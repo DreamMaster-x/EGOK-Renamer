@@ -14,7 +14,7 @@ if not exist "plugins\__init__.py" (
 )
 
 echo Установка необходимых библиотек...
-pip install watchdog pillow
+pip install watchdog pillow requests
 
 if errorlevel 1 (
     echo Ошибка установки библиотек!

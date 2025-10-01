@@ -38,10 +38,15 @@ if not exist "plugins" (
     echo # Пакет плагинов для EGOK Renamer > plugins\__init__.py
 )
 
-:: Проверяем наличие example_plugin.py и создаем если нет
+:: Проверяем наличие плагинов и создаем если нет
 if not exist "plugins\example_plugin.py" (
     echo Создаем пример плагина...
     type nul > plugins\example_plugin.py
+)
+
+if not exist "plugins\telegram_sender.py" (
+    echo Создаем плагин Telegram отправки...
+    type nul > plugins\telegram_sender.py
 )
 
 :: Проверяем наличие иконки
@@ -76,12 +81,14 @@ pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
 --hidden-import=inspect ^
 --hidden-import=importlib.util ^
 --hidden-import=importlib.machinery ^
+--hidden-import=requests ^
+--hidden-import=json ^
 --collect-all=plugins ^
 main.py
 
 if errorlevel 1 (
     echo.
-    echo Ошибка сборки EXE!
+    echo Ошибка сборки EXЕ!
     echo.
     echo Возможные решения:
     echo 1. Убедитесь что файл main.py существует
