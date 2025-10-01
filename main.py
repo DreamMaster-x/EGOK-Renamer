@@ -263,7 +263,7 @@ class RenamerApp:
         self.set_app_icon()
         
         # Добавляем информацию о разработчике в заголовок
-        self.developer_info = "Разработчик: @xDream_Master"
+        self.developer_info = "Разработчик: github.com/DreamMaster-x"
         
         self.settings = Settings()
         self.monitor = None
@@ -1072,6 +1072,7 @@ class RenamerApp:
 {1}, {2}, {3} - дополнительные переменные
 
 5. ТЕХНИЧЕСКАЯ ПОДДЕРЖКА:
+https://github.com/DreamMaster-x
 Telegram: @xDream_Master
 Email: drea_m_aster@vk.com"""
     
