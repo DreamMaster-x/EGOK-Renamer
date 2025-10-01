@@ -1,0 +1,59 @@
+{
+  "project": "Проект1",
+  "tl_type": "VK",
+  "route": "M2.1",
+  "number_format": "01",
+  "var1": "Значение1",
+  "var2": "Значение2",
+  "var3": "Значение3",
+  "folder": "C:\\video\\violations",
+  "extensions": "png,jpg,jpeg,png",
+  "template": "{project}_{date}_{route}_{counter}_{TL}",
+  "monitoring_enabled": false,
+  "rename_only_today": true,
+  "folder_history": [
+    "C:\\video\\violations",
+    "C:\\temp\\files",
+    "D:\\projects\\images"
+  ],
+  "template_history": [
+    "{project}_{date}_{route}_{counter}_{TL}",
+    "{project}_{TL}_{date}_{counter}",
+    "{route}_{date}_{counter}_{project}"
+  ],
+  "enabled_plugins": [
+    "example_plugin"
+  ],
+  "combobox_values": {
+    "project": [
+      "Проект1",
+      "Проект2"
+    ],
+    "tl_type": [
+      "VK",
+      "Другой"
+    ],
+    "route": [
+      "M2.1",
+      "M2.2",
+      "M2.3"
+    ],
+    "number_format": [
+      "1",
+      "01",
+      "001"
+    ],
+    "var1": [
+      "Значение1",
+      "Значение2"
+    ],
+    "var2": [
+      "Значение1",
+      "Значение2"
+    ],
+    "var3": [
+      "Значение1",
+      "Значение2"
+    ]
+  }
+}
