@@ -6,13 +6,13 @@
   "var1": "Значение1",
   "var2": "Значение2",
   "var3": "Значение3",
-  "folder": "D:/DownLoad/YandexDisk/Yandex.Disk/Скриншоты",
+  "folder": "D:\\1",
   "extensions": "png,jpg,jpeg,bmp",
   "template": "{project}_{date}_{route}_{counter}_{TL}",
-  "monitoring_enabled": true,
+  "monitoring_enabled": false,
   "rename_only_today": true,
   "folder_history": [
-    "D:/DownLoad/YandexDisk/Yandex.Disk/Скриншоты",
+    "D:\\1",
     "C:\\video\\violations",
     "C:\\temp\\files",
     "D:\\projects\\images"
@@ -57,12 +57,5 @@
       "Значение1",
       "Значение2"
     ]
-  },
-  "telegram_sender": {
-    "bot_token": "8228586921:AAG1hPVCF_kt8ec3jSH8oZxpi1hRlanLnN0",
-    "channel_id": "-1002251769471",
-    "delay_seconds": 15,
-    "monitor_folder": "C:\\video\\violations",
-    "extensions": "png,jpg,jpeg,bmp"
   }
 }

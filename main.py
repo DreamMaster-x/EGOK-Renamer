@@ -13,9 +13,67 @@ import sys
 import importlib
 import inspect
 import shutil
+import time
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from PIL import Image, ImageTk
+
+# Проверяем наличие tksheet
+try:
+    import tksheet
+    TKSHEET_AVAILABLE = True
+except ImportError:
+    TKSHEET_AVAILABLE = False
+    logging.error("Библиотека tksheet не установлена. Отчет будет ограничен в функциях.")
+
+class RenamedFilesManager:
+    """Менеджер для хранения информации о переименованных файлах"""
+    
+    def __init__(self, history_file="renamed_files.json"):
+        self.history_file = history_file
+        self.renamed_files = set()
+        self.load_history()
+    
+    def load_history(self):
+        """Загрузка истории переименований из файла"""
+        try:
+            if os.path.exists(self.history_file):
+                with open(self.history_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.renamed_files = set(data.get("renamed_files", []))
+                logging.info(f"Загружена история переименований: {len(self.renamed_files)} файлов")
+        except Exception as e:
+            logging.error(f"Ошибка загрузки истории переименований: {e}")
+            self.renamed_files = set()
+    
+    def save_history(self):
+        """Сохранение истории переименований в файл"""
+        try:
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump({"renamed_files": list(self.renamed_files)}, f, 
+                         ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"Ошибка сохранения истории переименований: {e}")
+    
+    def add_renamed_file(self, filepath):
+        """Добавление файла в историю переименований"""
+        file_key = self._get_file_key(filepath)
+        self.renamed_files.add(file_key)
+        self.save_history()
+    
+    def is_file_renamed(self, filepath):
+        """Проверка, был ли файл уже переименован программой"""
+        file_key = self._get_file_key(filepath)
+        return file_key in self.renamed_files
+    
+    def _get_file_key(self, filepath):
+        """Создание уникального ключа для файла"""
+        try:
+            # Используем комбинацию имени файла и времени создания
+            stat = os.stat(filepath)
+            return f"{Path(filepath).name}_{stat.st_ctime}"
+        except:
+            return filepath
 
 class Settings:
     """Класс для работы с настройками"""
@@ -117,7 +175,7 @@ class BasePlugin:
         return None
 
 class PluginManager:
-    """Менеджер плагинов для загрузки дополнительных вкладок"""
+    """Менеджер плагинов для загрузки дополнительных вкладки"""
     
     def __init__(self, settings, root):
         self.settings = settings
@@ -247,9 +305,17 @@ class FileHandler(FileSystemEventHandler):
                 
                 if file_ext in extensions:
                     # Добавляем небольшую задержку для гарантии, что файл полностью создан
-                    threading.Timer(0.5, lambda: self.rename_callback([event.src_path])).start()
+                    threading.Timer(1.0, lambda: self.safe_rename_callback(event.src_path)).start()
                 else:
                     logging.info(f"Файл {event.src_path} пропущен - расширение {file_ext} не в списке разрешенных")
+    
+    def safe_rename_callback(self, filepath):
+        """Безопасный вызов callback с обработкой исключений"""
+        try:
+            self.rename_callback([filepath])
+        except Exception as e:
+            logging.error(f"Критическая ошибка в обработчике переименования: {e}")
+            # Не падаем, а просто логируем ошибку
 
 class RenamerApp:
     """Главное приложение"""
@@ -257,20 +323,45 @@ class RenamerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("EGOK Renamer")
-        self.root.geometry("900x600")
+        self.root.geometry("1200x800")
         
         # Установка иконки приложения
         self.set_app_icon()
         
         # Добавляем информацию о разработчике в заголовок
-        self.developer_info = "Разработчик: github.com/DreamMaster-x"
+        self.developer_info = "Разработчик: @xDream_Master"
         
         self.settings = Settings()
+        self.renamed_files_manager = RenamedFilesManager()
         self.monitor = None
         self.log_queue = queue.Queue()
         self.widgets = {}
-        self.log_line_counter = 0  # Счетчик для чередования цветов
-        self.renamed_files = set()  # Множество для хранения переименованных файлов
+        self.log_line_counter = 0
+        self.rename_history = []
+        self.current_route_filter = "Все"
+        
+        # Данные для отчета
+        self.report_data = []
+        self.filtered_report_data = []
+        
+        # Заголовки колонок
+        self.column_headers = ["№", "Время создания", "Маршрут", "Исходное имя файла", "Новое имя файла"]
+        self.column_ids = ["number", "create_time", "route", "original_name", "new_name"]
+        
+        # Словарь для управления видимостью колонок
+        self.column_visibility = {
+            "number": True,
+            "create_time": True,
+            "route": True,
+            "original_name": True,
+            "new_name": True
+        }
+        
+        # Порядок колонок
+        self.column_order = ["number", "create_time", "route", "original_name", "new_name"]
+        
+        # Блокировка для безопасного доступа к общим ресурсам
+        self.rename_lock = threading.Lock()
         
         # Инициализация менеджера плагинов
         self.plugin_manager = PluginManager(self.settings, self.root)
@@ -304,15 +395,24 @@ class RenamerApp:
             logging.error(f"Ошибка загрузки иконки: {e}")
     
     def setup_logging(self):
-        """Настройка логирования"""
+        """Настройка логирования в txt файл"""
+        # Создаем папку для логов если нет
+        log_dir = "logs"
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        
+        # Создаем имя файла с датой
+        log_filename = os.path.join(log_dir, f"renamer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+        
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler('renamer.log', encoding='utf-8'),
+                logging.FileHandler(log_filename, encoding='utf-8'),
                 logging.StreamHandler()
             ]
         )
+        logging.info(f"Логирование запущено: {log_filename}")
     
     def create_widgets(self):
         """Создание интерфейса"""
@@ -386,7 +486,7 @@ class RenamerApp:
         egok_tab = ttk.Frame(self.notebook)
         self.notebook.add(egok_tab, text="ЭГОК")
         
-        # Создаем содержимое вкладки ЭГОК с разделителем
+        # Создаем содержимое вкладки ЭГОК с новой структурой
         self.create_egok_tab(egok_tab)
         
         # Загружаем и создаем вкладки плагинов
@@ -394,37 +494,54 @@ class RenamerApp:
         self.plugin_manager.create_plugin_tabs(self.notebook)
     
     def create_egok_tab(self, parent):
-        """Создание основной вкладки ЭГОК с настройками и логами"""
+        """Создание основной вкладки ЭГОК с новой структурой"""
         # Создаем PanedWindow для разделения на левую и правую часть
         paned_window = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)
         paned_window.pack(fill=tk.BOTH, expand=True)
         
-        # Левая часть - настройки
+        # Левая часть - настройки и логи (вертикальное разделение)
         left_frame = ttk.Frame(paned_window)
         paned_window.add(left_frame, weight=1)
         
-        # Правая часть - логи
+        # Правая часть - отчет (занимает всю правую часть)
         right_frame = ttk.Frame(paned_window)
         paned_window.add(right_frame, weight=1)
         
-        # Создаем содержимое левой части (настройки)
-        self.create_settings_tab(left_frame)
+        # Создаем содержимое левой части (настройки сверху, логи снизу)
+        self.create_settings_and_logs_tab(left_frame)
         
-        # Создаем содержимое правой части (логи)
-        self.create_log_tab(right_frame)
+        # Создаем содержимое правой части (отчет)
+        self.create_report_tab(right_frame)
         
-        # Устанавливаем начальное соотношение размеров (60% настройки, 40% логи)
-        paned_window.sashpos(0, int(parent.winfo_reqwidth() * 0.6))
+        # Устанавливаем начальное соотношение размеров (40% настройки+логи, 60% отчет)
+        paned_window.sashpos(0, int(parent.winfo_reqwidth() * 0.4))
     
-    def create_settings_tab(self, parent):
-        """Создание левой части с настройками"""
-        # Основные настройки
-        main_settings_frame = ttk.LabelFrame(parent, text="Основные настройки")
-        main_settings_frame.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
+    def create_settings_and_logs_tab(self, parent):
+        """Создание левой части с настройки и логами"""
+        # Создаем вертикальный PanedWindow для разделения настроек и логов
+        left_paned = ttk.PanedWindow(parent, orient=tk.VERTICAL)
+        left_paned.pack(fill=tk.BOTH, expand=True)
         
+        # Верхняя часть - основные настройки
+        settings_frame = ttk.LabelFrame(left_paned, text="Основные настройки")
+        left_paned.add(settings_frame, weight=1)
+        
+        # Нижняя часть - логи
+        log_frame = ttk.LabelFrame(left_paned, text="Логи программы")
+        left_paned.add(log_frame, weight=1)
+        
+        # Заполняем фреймы
+        self.create_settings_content(settings_frame)
+        self.create_log_content(log_frame)
+        
+        # Устанавливаем соотношение (60% настройки, 40% логи)
+        left_paned.sashpos(0, int(parent.winfo_reqheight() * 0.6))
+    
+    def create_settings_content(self, parent):
+        """Создание содержимого основных настроек"""
         # Создаем скроллируемую область для настроек
-        settings_canvas = tk.Canvas(main_settings_frame)
-        scrollbar = ttk.Scrollbar(main_settings_frame, orient="vertical", command=settings_canvas.yview)
+        settings_canvas = tk.Canvas(parent)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=settings_canvas.yview)
         scrollable_frame = ttk.Frame(settings_canvas)
         
         scrollable_frame.bind(
@@ -520,7 +637,7 @@ class RenamerApp:
         # Создаем кастомный стиль для кнопки-переключателя
         style = ttk.Style()
         style.configure("Green.TButton", background="#4CAF50", foreground="#4CAF50")
-        style.configure("Red.TButton", background="#F44336", foreground="red")
+        style.configure("Red.TButton", background="#F44336", foreground="#F44336")
         
         self.monitoring_button = ttk.Button(
             monitoring_frame, 
@@ -534,6 +651,20 @@ class RenamerApp:
         # Обновляем состояние кнопки при запуске
         self.update_monitoring_button()
         
+        # Опция переименовывать только сегодняшние файлы
+        today_only_frame = ttk.Frame(rename_frame)
+        today_only_frame.pack(fill=tk.X, pady=2)
+        
+        self.rename_only_today_var = tk.BooleanVar(value=self.settings.settings.get("rename_only_today", True))
+        self.widgets["rename_only_today_var"] = self.rename_only_today_var
+        
+        rename_only_today_cb = ttk.Checkbutton(
+            today_only_frame, 
+            text="Переименовывать только сегодняшние файлы",
+            variable=self.rename_only_today_var
+        )
+        rename_only_today_cb.pack(anchor=tk.W)
+        
         # Кнопки управления
         button_frame = ttk.Frame(scrollable_frame)
         button_frame.pack(pady=10, fill=tk.X)
@@ -542,22 +673,407 @@ class RenamerApp:
         ttk.Button(button_frame, text="Управление плагинами", command=self.show_plugins_dialog).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Установить плагин", command=self.install_plugin_dialog).pack(side=tk.LEFT, padx=5)
     
-    def create_log_tab(self, parent):
-        """Создание правой части с логами"""
-        log_frame = ttk.LabelFrame(parent, text="Логи программы")
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
-        
+    def create_log_content(self, parent):
+        """Создание содержимого логов"""
         # Текстовое поле для логов с поддержкой цветов
-        self.log_text = tk.Text(log_frame, wrap=tk.WORD, state=tk.DISABLED)
+        self.log_text = tk.Text(parent, wrap=tk.WORD, state=tk.DISABLED)
         self.log_text.tag_configure("black", foreground="black")
         self.log_text.tag_configure("gray", foreground="gray")
         self.log_text.tag_configure("error", foreground="red")
         
-        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
+        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
         
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    def create_report_tab(self, parent):
+        """Создание правой части с отчетом"""
+        # Отчет о переименованных файлах
+        report_frame = ttk.LabelFrame(parent, text="Отчет о переименованных файлах")
+        report_frame.pack(fill=tk.BOTH, expand=True, pady=5, padx=5)
+        
+        # Фрейм для кнопок управления отчетом и фильтра (над таблицей)
+        report_controls_frame = ttk.Frame(report_frame)
+        report_controls_frame.pack(fill=tk.X, pady=5)
+        
+        # Кнопки управления отчетом
+        ttk.Button(report_controls_frame, text="Копировать выделенное", command=self.copy_selected_cells).pack(side=tk.LEFT, padx=2)
+        ttk.Button(report_controls_frame, text="Копировать все", command=self.copy_all_files).pack(side=tk.LEFT, padx=2)
+        ttk.Button(report_controls_frame, text="Очистить отчет", command=self.clear_report).pack(side=tk.LEFT, padx=2)
+        ttk.Button(report_controls_frame, text="Экспорт в файл", command=self.export_report).pack(side=tk.LEFT, padx=2)
+        
+        # Кнопка управления колонками
+        ttk.Button(report_controls_frame, text="Управление колонками", command=self.show_column_management_dialog).pack(side=tk.LEFT, padx=2)
+        
+        # Фильтр по маршруту
+        filter_frame = ttk.Frame(report_controls_frame)
+        filter_frame.pack(side=tk.RIGHT, padx=5)
+        
+        ttk.Label(filter_frame, text="Фильтр по маршруту:").pack(side=tk.LEFT, padx=2)
+        
+        self.route_filter_var = tk.StringVar(value="Все")
+        self.route_filter_cb = ttk.Combobox(
+            filter_frame, 
+            textvariable=self.route_filter_var,
+            values=["Все"] + self.settings.settings["combobox_values"]["route"],
+            state="readonly",
+            width=10
+        )
+        self.route_filter_cb.pack(side=tk.LEFT, padx=2)
+        self.route_filter_cb.bind('<<ComboboxSelected>>', self.on_route_filter_changed)
+        
+        # Фрейм для таблицы отчета
+        table_frame = ttk.Frame(report_frame)
+        table_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Создаем улучшенную таблицу с поддержкой выделения ячеек
+        if TKSHEET_AVAILABLE:
+            self.create_sheet_table(table_frame)
+        else:
+            self.create_fallback_table(table_frame)
+        
+        # Применяем настройки видимости колонок
+        self.apply_column_visibility()
+    
+    def create_sheet_table(self, parent):
+        """Создание продвинутой таблицы с помощью tksheet"""
+        # Создаем таблицу
+        self.report_sheet = tksheet.Sheet(
+            parent,
+            show_row_index=False,
+            headers=["№", "Время", "Маршрут", "Исходное имя", "Новое имя"],
+            header_height=30,
+            row_index_width=50
+        )
+        
+        # Настраиваем таблицу
+        self.report_sheet.enable_bindings(
+            "single_select",
+            "row_select",
+            "column_select",
+            "arrowkeys",
+            "right_click_popup_menu",
+            "rc_select",
+            "rc_insert_row",
+            "rc_delete_row",
+            "copy",
+            "cut",
+            "paste",
+            "delete",
+            "undo",
+            "edit_cell"
+        )
+        
+        # Устанавливаем данные
+        self.report_sheet.set_sheet_data(self.report_data)
+        
+        # Настраиваем колонки
+        self.report_sheet.column_width(column=0, width=50)   # №
+        self.report_sheet.column_width(column=1, width=100)  # Время
+        self.report_sheet.column_width(column=2, width=80)   # Маршрут
+        self.report_sheet.column_width(column=3, width=200)  # Исходное имя
+        self.report_sheet.column_width(column=4, width=200)  # Новое имя
+        
+        # Упаковка таблицы
+        self.report_sheet.pack(fill=tk.BOTH, expand=True)
+        
+        # Контекстное меню для копирования
+        self.report_context_menu = tk.Menu(self.report_sheet, tearoff=0)
+        self.report_context_menu.add_command(label="Копировать выделенное", command=self.copy_selected_cells)
+        self.report_context_menu.add_command(label="Копировать всю таблицу", command=self.copy_all_files)
+        self.report_context_menu.add_separator()
+        self.report_context_menu.add_command(label="Очистить отчет", command=self.clear_report)
+        
+        # Привязываем контекстное меню
+        self.report_sheet.bind("<Button-3>", self.show_report_context_menu)
+    
+    def create_fallback_table(self, parent):
+        """Создание резервной таблицы с помощью Treeview (если tksheet не доступен)"""
+        # Создаем Treeview для отчета с новыми колонками
+        columns = ("number", "create_time", "route", "original_name", "new_name")
+        self.report_tree = ttk.Treeview(parent, columns=columns, show="headings", selectmode='extended')
+        
+        # Настраиваем заголовки колонок
+        self.report_tree.heading("number", text="№")
+        self.report_tree.heading("create_time", text="Время")
+        self.report_tree.heading("route", text="Маршрут")
+        self.report_tree.heading("original_name", text="Исходное имя")
+        self.report_tree.heading("new_name", text="Новое имя")
+        
+        # Настраиваем колонки для максимального расширения
+        self.report_tree.column("number", width=40, minwidth=40, stretch=False)
+        self.report_tree.column("create_time", width=120, minwidth=120, stretch=False)
+        self.report_tree.column("route", width=80, minwidth=80, stretch=False)
+        self.report_tree.column("original_name", width=200, minwidth=150, stretch=True)
+        self.report_tree.column("new_name", width=200, minwidth=150, stretch=True)
+        
+        # Scrollbar для Treeview
+        report_scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.report_tree.yview)
+        self.report_tree.configure(yscrollcommand=report_scrollbar.set)
+        
+        # Упаковка таблицы
+        self.report_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        report_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Контекстное меню для копирования
+        self.report_context_menu = tk.Menu(self.report_tree, tearoff=0)
+        self.report_context_menu.add_command(label="Копировать выделенные строки", command=self.copy_selected_files)
+        self.report_context_menu.add_command(label="Копировать всю таблицу", command=self.copy_all_files)
+        self.report_context_menu.add_separator()
+        self.report_context_menu.add_command(label="Очистить отчет", command=self.clear_report)
+        
+        # Привязываем контекстное меню
+        self.report_tree.bind("<Button-3>", self.show_report_context_menu)
+    
+    def show_report_context_menu(self, event):
+        """Показать контекстное меню для отчета"""
+        self.report_context_menu.post(event.x_root, event.y_root)
+    
+    def copy_selected_cells(self):
+        """Копировать выделенные ячейки в буфер обмена"""
+        if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
+            # Используем встроенную функцию копирования tksheet
+            try:
+                self.report_sheet.ctrl_c()
+                messagebox.showinfo("Успех", "Выделенные ячейки скопированы в буфер обмена")
+            except Exception as e:
+                logging.error(f"Ошибка копирования ячеек: {e}")
+                messagebox.showerror("Ошибка", f"Не удалось скопировать ячейки: {e}")
+        else:
+            # Резервный метод для Treeview
+            self.copy_selected_files()
+    
+    def copy_selected_files(self):
+        """Копировать выделенные строки в буфер обмена (для Treeview)"""
+        if not TKSHEET_AVAILABLE and hasattr(self, 'report_tree'):
+            selected_items = self.report_tree.selection()
+            if not selected_items:
+                messagebox.showwarning("Внимание", "Не выделены строки для копирования")
+                return
+            
+            # Собираем все данные выделенных строк
+            all_lines = []
+            for item in selected_items:
+                values = self.report_tree.item(item, "values")
+                if values:
+                    # Формируем строку с табуляцией между значениями
+                    line = "\t".join(str(value) for value in values)
+                    all_lines.append(line)
+            
+            if all_lines:
+                # Копируем в буфер обмена
+                self.root.clipboard_clear()
+                self.root.clipboard_append("\n".join(all_lines))
+                messagebox.showinfo("Успех", f"Скопировано {len(all_lines)} строк в буфер обмена")
+    
+    def copy_all_files(self):
+        """Копировать все данные отчета в буфер обмена"""
+        if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
+            # Выделяем всю таблицу и копируем
+            try:
+                self.report_sheet.select_all()
+                self.report_sheet.ctrl_c()
+                self.report_sheet.deselect("all")
+                messagebox.showinfo("Успех", "Вся таблица скопирована в буфер обмена")
+            except Exception as e:
+                logging.error(f"Ошибка копирования таблицы: {e}")
+                messagebox.showerror("Ошибка", f"Не удалось скопировать таблицу: {e}")
+        elif hasattr(self, 'report_tree'):
+            # Резервный метод для Treeview
+            all_items = self.report_tree.get_children()
+            if not all_items:
+                messagebox.showwarning("Внимание", "В отчете нет данных")
+                return
+            
+            # Собираем все данные всех строк
+            all_lines = []
+            for item in all_items:
+                values = self.report_tree.item(item, "values")
+                if values:
+                    # Формируем строку с табуляцией между значениями
+                    line = "\t".join(str(value) for value in values)
+                    all_lines.append(line)
+            
+            if all_lines:
+                # Копируем в буфер обмена
+                self.root.clipboard_clear()
+                self.root.clipboard_append("\n".join(all_lines))
+                messagebox.showinfo("Успех", f"Скопировано {len(all_lines)} строк в буфер обмена")
+    
+    def clear_report(self):
+        """Очистить отчет"""
+        if messagebox.askyesno("Подтверждение", "Очистить отчет о переименованных файлах?"):
+            if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
+                self.report_sheet.set_sheet_data([])
+                self.report_data = []
+            elif hasattr(self, 'report_tree'):
+                for item in self.report_tree.get_children():
+                    self.report_tree.delete(item)
+            
+            self.rename_history.clear()
+            # Сбрасываем фильтр
+            self.route_filter_var.set("Все")
+            self.current_route_filter = "Все"
+    
+    def export_report(self):
+        """Экспорт отчета в файл"""
+        if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
+            data = self.report_sheet.get_sheet_data()
+            if not data or len(data) == 0:
+                messagebox.showwarning("Внимание", "В отчете нет данных для экспорта")
+                return
+        elif hasattr(self, 'report_tree'):
+            all_items = self.report_tree.get_children()
+            if not all_items:
+                messagebox.showwarning("Внимание", "В отчете нет данных для экспорта")
+                return
+        else:
+            messagebox.showwarning("Внимание", "Отчет не инициализирован")
+            return
+        
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Экспорт отчета"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write("Отчет о переименованных файлах\n")
+                    f.write("=" * 80 + "\n")
+                    f.write(f"Создан: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Фильтр по маршруту: {self.current_route_filter}\n")
+                    f.write("=" * 80 + "\n")
+                    f.write("№\tВремя\tМаршрут\tИсходное имя\tНовое имя\n")
+                    f.write("-" * 80 + "\n")
+                    
+                    if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
+                        # Экспорт данных из tksheet
+                        for row in self.report_sheet.get_sheet_data():
+                            if row and any(cell is not None for cell in row):
+                                f.write(f"{row[0] or ''}\t{row[1] or ''}\t{row[2] or ''}\t{row[3] or ''}\t{row[4] or ''}\n")
+                    else:
+                        # Экспорт данных из Treeview
+                        for item in self.report_tree.get_children():
+                            values = self.report_tree.item(item, "values")
+                            if values and len(values) > 4:
+                                f.write(f"{values[0]}\t{values[1]}\t{values[2]}\t{values[3]}\t{values[4]}\n")
+                
+                messagebox.showinfo("Успех", f"Отчет экспортирован в файл:\n{file_path}")
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Ошибка экспорта отчета: {e}")
+    
+    def add_to_report(self, original_name, new_name, filepath):
+        """Добавление записи в отчет о переименовании"""
+        # Получаем время создания файла до переименования
+        try:
+            # Используем исходный путь к файлу до переименования
+            create_time = datetime.fromtimestamp(os.path.getctime(filepath)).strftime('%H:%M:%S')
+        except Exception as e:
+            logging.error(f"Ошибка получения времени создания файла {filepath}: {e}")
+            # Если не удалось получить время создания, используем текущее время
+            create_time = datetime.now().strftime('%H:%M:%S')
+        
+        # Получаем текущий маршрут из настроек
+        route = self.settings.settings["route"]
+        
+        # Номер строки
+        number = len(self.rename_history) + 1
+        
+        # Добавляем в историю
+        self.rename_history.append({
+            "number": number,
+            "create_time": create_time,
+            "route": route,
+            "original_name": original_name,
+            "new_name": new_name
+        })
+        
+        # Создаем строку данных
+        row_data = [number, create_time, route, original_name, new_name]
+        
+        # Добавляем в данные отчета
+        self.report_data.append(row_data)
+        
+        # Добавляем в таблицу
+        if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
+            self.report_sheet.set_sheet_data(self.report_data)
+        elif hasattr(self, 'report_tree'):
+            values = (number, create_time, route, original_name, new_name)
+            item_id = self.report_tree.insert("", tk.END, values=values)
+            
+            # Применяем текущий фильтр
+            if self.current_route_filter != "Все" and route != self.current_route_filter:
+                self.report_tree.detach(item_id)
+            
+            # Автоматически прокручиваем к последней записи
+            self.report_tree.see(item_id)
+    
+    def apply_column_visibility(self):
+        """Применить настройки видимости колонок"""
+        if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
+            # Для tksheet скрываем/показываем колонки
+            columns_to_show = []
+            columns_to_hide = []
+            
+            for i, column in enumerate(self.column_order):
+                if self.column_visibility[column]:
+                    columns_to_show.append(i)
+                else:
+                    columns_to_hide.append(i)
+            
+            # ИСПРАВЛЕНИЕ: используем правильные названия методов
+            if columns_to_show:
+                self.report_sheet.show_columns(columns_to_show)
+            if columns_to_hide:
+                self.report_sheet.hide_columns(columns_to_hide)
+        elif hasattr(self, 'report_tree'):
+            # Для Treeview определяем видимые колонки в правильном порядке
+            visible_columns = [col for col in self.column_order if self.column_visibility[col]]
+            
+            # Устанавливаем отображаемые колонки
+            self.report_tree["displaycolumns"] = visible_columns
+            
+            # Обновляем заголовки для видимых колонок
+            column_names = {
+                "number": "№",
+                "create_time": "Время",
+                "route": "Маршрут",
+                "original_name": "Исходное имя",
+                "new_name": "Новое имя"
+            }
+            
+            for column in visible_columns:
+                self.report_tree.heading(column, text=column_names[column])
+    
+    def on_route_filter_changed(self, event=None):
+        """Обработка изменения фильтра по маршруту"""
+        selected_route = self.route_filter_var.get()
+        self.current_route_filter = selected_route
+        
+        if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
+            # Для tksheet фильтруем данные
+            if selected_route == "Все":
+                self.report_sheet.set_sheet_data(self.report_data)
+            else:
+                filtered_data = [row for row in self.report_data if row[2] == selected_route]
+                self.report_sheet.set_sheet_data(filtered_data)
+        elif hasattr(self, 'report_tree'):
+            # Для Treeview показываем/скрываем элементы в соответствии с фильтром
+            all_items = self.report_tree.get_children()
+            
+            for item in all_items:
+                values = self.report_tree.item(item, "values")
+                if len(values) > 2:
+                    route = values[2]  # values[2] - колонка с маршрутом
+                    if selected_route == "Все" or route == selected_route:
+                        # Показываем элемент
+                        self.report_tree.attach(item, '', 'end')
+                    else:
+                        # Скрываем элемент (но не удаляем)
+                        self.report_tree.detach(item)
     
     def create_combobox_row(self, parent, label, key, row):
         """Создание строки с Combobox"""
@@ -602,6 +1118,66 @@ class RenamerApp:
         # Добавляем информацию о поддержке в нижний колонтитул
         support_label = ttk.Label(footer_frame, text=self.developer_info, foreground="gray", font=('Arial', 8))
         support_label.pack(side=tk.RIGHT, padx=5)
+    
+    def show_column_management_dialog(self):
+        """Диалог управления колонками"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Управление колонками отчета")
+        dialog.geometry("300x250")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        main_frame = ttk.Frame(dialog, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_frame, text="Видимые колонки:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 10))
+        
+        # Фрейм для списка колонок
+        columns_frame = ttk.Frame(main_frame)
+        columns_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Создаем чекбоксы для каждой колонки
+        column_vars = {}
+        for column in self.column_order:
+            var = tk.BooleanVar(value=self.column_visibility[column])
+            column_vars[column] = var
+            
+            # Определяем название колонки для отображения
+            column_names = {
+                "number": "№",
+                "create_time": "Время",
+                "route": "Маршрут",
+                "original_name": "Исходное имя",
+                "new_name": "Новое имя"
+            }
+            
+            cb = ttk.Checkbutton(columns_frame, text=column_names[column], variable=var)
+            cb.pack(anchor=tk.W, pady=2)
+        
+        def save_columns():
+            # Сохраняем настройки видимости
+            for column, var in column_vars.items():
+                self.column_visibility[column] = var.get()
+            
+            # Применяем изменения
+            self.apply_column_visibility()
+            dialog.destroy()
+        
+        def reset_columns():
+            # Сбрасываем настройки к значениям по умолчанию
+            for column in self.column_visibility:
+                self.column_visibility[column] = True
+            self.column_order = ["number", "create_time", "route", "original_name", "new_name"]
+            self.apply_column_visibility()
+            dialog.destroy()
+        
+        # Фрейм для кнопок
+        buttons_frame = ttk.Frame(main_frame)
+        buttons_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Button(buttons_frame, text="Сохранить", command=save_columns).pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Сбросить", command=reset_columns).pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Отмена", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
     
     def install_plugin_dialog(self):
         """Диалог установки нового плагина"""
@@ -792,9 +1368,10 @@ class RenamerApp:
                 self.settings.update_setting("template", template)
                 self.settings.add_to_template_history(template)
             
-            if "monitoring_var" in self.widgets:
-                monitoring_enabled = self.widgets["monitoring_var"].get()
-                self.settings.update_setting("monitoring_enabled", monitoring_enabled)
+            # Сохраняем настройку переименовывать только сегодняшние файлы
+            if "rename_only_today_var" in self.widgets:
+                rename_only_today = self.widgets["rename_only_today_var"].get()
+                self.settings.update_setting("rename_only_today", rename_only_today)
             
             messagebox.showinfo("Успех", "Настройки сохранены!")
         except Exception as e:
@@ -816,7 +1393,7 @@ class RenamerApp:
         self.update_monitoring_button()
 
     def start_monitoring(self):
-        """Запуск мониторинга"""
+        """Запуск мониторинга - ТЕПЕРЬ БЕЗ ПЕРЕИМЕНОВАНИЯ СУЩЕСТВУЮЩИХ ФАЙЛОВ"""
         if not self.monitor:
             self.monitor = FileMonitor(self.settings, self.rename_files)
         
@@ -825,7 +1402,9 @@ class RenamerApp:
         if success:
             # Сохраняем настройку
             self.settings.update_setting("monitoring_enabled", True)
-            logging.info("Мониторинг запущен")
+            
+            # УБРАН ВЫЗОВ ПЕРЕИМЕНОВАНИЯ СУЩЕСТВУЮЩИХ ФАЙЛОВ
+            logging.info("Мониторинг запущен (без переименования существующих файлов)")
         else:
             messagebox.showerror("Ошибка", "Не удалось запустить мониторинг")
 
@@ -870,7 +1449,7 @@ class RenamerApp:
         return f"{filename}.{file_ext}"
 
     def get_next_counter(self):
-        """Получение следующего номера счетчика с учетом уже переименованных файлов"""
+        """Получение следующего номера счетчика с учетом уже переименованных файлов и файлов в папке"""
         folder = self.settings.settings["folder"]
         today = datetime.now().strftime("%Y%m%d")
         
@@ -891,100 +1470,131 @@ class RenamerApp:
                 counter = int(match.group(1))
                 max_counter = max(max_counter, counter)
         
-        return max_counter + 1
+        # Также проверяем историю переименований на случай, если файлы были удалены
+        # но мы хотим продолжить нумерацию с правильного номера
+        history_counter = self.get_max_counter_from_history()
+        
+        return max(max_counter, history_counter) + 1
+
+    def get_max_counter_from_history(self):
+        """Получение максимального номера из истории переименований"""
+        max_counter = 0
+        today = datetime.now().strftime("%Y%m%d")
+        
+        pattern = re.compile(
+            f"{re.escape(self.settings.settings['project'])}_{re.escape(today)}_"
+            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['tl_type'])}"
+        )
+        
+        # Проверяем файлы в папке, которые уже соответствуют шаблону
+        folder = self.settings.settings["folder"]
+        if os.path.exists(folder):
+            for filename in os.listdir(folder):
+                match = pattern.match(filename)
+                if match:
+                    counter = int(match.group(1))
+                    max_counter = max(max_counter, counter)
+        
+        return max_counter
 
     def rename_files(self, specific_files=None):
-        """Переименование файлов"""
+        """Переименование файлов с улучшенной логикой - ТОЛЬКО НОВЫЕ ФАЙЛЫ"""
         try:
-            folder = self.settings.settings["folder"]
-            extensions = [ext.strip().lower() for ext in self.settings.settings["extensions"].split(",")]
-            
-            if not os.path.exists(folder):
-                logging.error(f"Папка не существует: {folder}")
-                return
-            
-            if specific_files:
-                # Если переданы конкретные файлы (при мониторинге) - фильтруем по расширениям
-                files_to_process = []
-                for filepath in specific_files:
-                    if os.path.exists(filepath):
-                        file_ext = Path(filepath).suffix.lower()[1:]
-                        if file_ext in extensions:
-                            # Проверяем, нужно ли переименовывать только сегодняшние файлы
-                            if self.settings.settings.get("rename_only_today", True):
-                                if self.is_file_from_today(filepath):
-                                    files_to_process.append(filepath)
-                                else:
-                                    logging.info(f"Файл {filepath} пропущен - создан не сегодня")
-                            else:
-                                files_to_process.append(filepath)
-                        else:
-                            logging.info(f"Файл {filepath} пропущен - расширение {file_ext} не в списке разрешенных")
-            else:
-                # При автоматическом переименовании - обрабатываем все подходящие файлы
-                files_to_process = []
-                for filename in os.listdir(folder):
-                    filepath = os.path.join(folder, filename)
-                    if (os.path.isfile(filepath) and 
-                        Path(filename).suffix.lower()[1:] in extensions and
-                        not self.is_already_renamed(filename)):
-                        
-                        # Проверяем, нужно ли переименовывать только сегодняшние файлы
-                        if self.settings.settings.get("rename_only_today", True):
-                            if self.is_file_from_today(filepath):
-                                files_to_process.append(filepath)
-                            else:
-                                logging.info(f"Файл {filepath} пропущен - создан не сегодня")
-                        else:
-                            files_to_process.append(filepath)
-            
-            # Сортируем файлы по времени создания для правильной нумерации
-            files_to_process.sort(key=lambda x: os.path.getctime(x))
-            
-            # Получаем начальный счетчик
-            start_counter = self.get_next_counter()
-            current_counter = start_counter
-            
-            for filepath in files_to_process:
-                try:
-                    # Проверяем, не был ли файл уже переименован
-                    if filepath in self.renamed_files:
-                        continue
-                    
-                    new_name = self.generate_filename(filepath, current_counter)
-                    new_path = os.path.join(folder, new_name)
-                    
-                    # Проверяем, не переименован ли уже файл
-                    if not os.path.exists(new_path):
-                        os.rename(filepath, new_path)
-                        log_message = f"{Path(filepath).name} -> {new_name}"
-                        logging.info(log_message)
-                        self.log_queue.put(log_message)
-                        
-                        # Добавляем файл в множество переименованных
-                        self.renamed_files.add(filepath)
-                        current_counter += 1
-                    else:
-                        # Если файл с таким именем уже существует, ищем следующий свободный номер
-                        conflict_counter = current_counter + 1
-                        while os.path.exists(new_path):
-                            new_name = self.generate_filename(filepath, conflict_counter)
-                            new_path = os.path.join(folder, new_name)
-                            conflict_counter += 1
-                        
-                        os.rename(filepath, new_path)
-                        log_message = f"{Path(filepath).name} -> {new_name} (автоподбор номера)"
-                        logging.info(log_message)
-                        self.log_queue.put(log_message)
-                        
-                        # Добавляем файл в множество переименованных
-                        self.renamed_files.add(filepath)
-                        current_counter = conflict_counter
+            # Используем блокировку для предотвращения конфликтов при одновременном переименовании
+            with self.rename_lock:
+                folder = self.settings.settings["folder"]
+                extensions = [ext.strip().lower() for ext in self.settings.settings["extensions"].split(",")]
                 
-                except Exception as e:
-                    error_msg = f"Ошибка переименования {filepath}: {e}"
-                    logging.error(error_msg)
-                    self.log_queue.put(f"ОШИБКА: {error_msg}")
+                if not os.path.exists(folder):
+                    logging.error(f"Папка не существует: {folder}")
+                    return
+                
+                # Если переданы конкретные файлы (при мониторинге) - обрабатываем только их
+                if specific_files:
+                    files_to_process = []
+                    for filepath in specific_files:
+                        if os.path.exists(filepath):
+                            file_ext = Path(filepath).suffix.lower()[1:]
+                            if file_ext in extensions:
+                                # Проверяем, нужно ли переименовывать только сегодняшние файлы
+                                if self.settings.settings.get("rename_only_today", True):
+                                    if self.is_file_from_today(filepath):
+                                        files_to_process.append(filepath)
+                                    else:
+                                        logging.info(f"Файл {filepath} пропущен - создан не сегодня")
+                                else:
+                                    files_to_process.append(filepath)
+                            else:
+                                logging.info(f"Файл {filepath} пропущен - расширение {file_ext} не в списке разрешенных")
+                
+                # УБРАНА ОБРАБОТКА СУЩЕСТВУЮЩИХ ФАЙЛОВ ПРИ ЗАПУСКЕ МОНИТОРИНГА
+                
+                # Сортируем файлы по времени создания для правильной нумерации
+                files_to_process.sort(key=lambda x: os.path.getctime(x))
+                
+                # Получаем начальный счетчик
+                start_counter = self.get_next_counter()
+                current_counter = start_counter
+                
+                for filepath in files_to_process:
+                    try:
+                        # Проверяем, не был ли файл уже переименован программой
+                        if self.renamed_files_manager.is_file_renamed(filepath):
+                            logging.info(f"Файл {filepath} уже был переименован программой, пропускаем")
+                            continue
+                        
+                        # Получаем время создания файла ДО переименования
+                        try:
+                            create_time = datetime.fromtimestamp(os.path.getctime(filepath)).strftime('%H:%M:%S')
+                        except Exception as e:
+                            logging.error(f"Ошибка получения времени создания файла {filepath}: {e}")
+                            create_time = datetime.now().strftime('%H:%M:%S')
+                        
+                        original_name = Path(filepath).name
+                        new_name = self.generate_filename(filepath, current_counter)
+                        new_path = os.path.join(folder, new_name)
+                        
+                        # Проверяем, не переименован ли уже файл
+                        if not os.path.exists(new_path):
+                            # Добавляем задержку для гарантии, что файл полностью доступен
+                            time.sleep(0.1)
+                            os.rename(filepath, new_path)
+                            log_message = f"{original_name} -> {new_name}"
+                            logging.info(log_message)
+                            self.log_queue.put(log_message)
+                            
+                            # Добавляем в отчет с временем создания
+                            self.root.after(0, lambda: self.add_to_report(original_name, new_name, filepath))
+                            
+                            # Добавляем файл в историю переименований
+                            self.renamed_files_manager.add_renamed_file(filepath)
+                            current_counter += 1
+                        else:
+                            # Если файл с таким именем уже существует, ищем следующий свободный номер
+                            conflict_counter = current_counter + 1
+                            while os.path.exists(new_path):
+                                new_name = self.generate_filename(filepath, conflict_counter)
+                                new_path = os.path.join(folder, new_name)
+                                conflict_counter += 1
+                            
+                            # Добавляем задержку для гарантии, что файл полностью доступен
+                            time.sleep(0.1)
+                            os.rename(filepath, new_path)
+                            log_message = f"{original_name} -> {new_name} (автоподбор номера)"
+                            logging.info(log_message)
+                            self.log_queue.put(log_message)
+                            
+                            # Добавляем в отчет с временем создания
+                            self.root.after(0, lambda: self.add_to_report(original_name, new_name, filepath))
+                            
+                            # Добавляем файл в историю переименований
+                            self.renamed_files_manager.add_renamed_file(filepath)
+                            current_counter = conflict_counter
+                    
+                    except Exception as e:
+                        error_msg = f"Ошибка переименования {filepath}: {e}"
+                        logging.error(error_msg)
+                        self.log_queue.put(f"ОШИБКА: {error_msg}")
         
         except Exception as e:
             error_msg = f"Общая ошибка переименования: {e}"
@@ -1041,9 +1651,10 @@ class RenamerApp:
         help_text = """КАК ПОЛЬЗОВАТЬСЯ ПРОГРАММОЙ:
 
 1. ОСНОВНЫЕ ФУНКЦИИ:
-- Автоматическое переименование файлов
+- Автоматическое переименование НОВЫХ файлов
 - Мониторинг папки в реальном времени
 - Гибкие шаблоны имен
+- Отчет о переименованных файлах с возможностью выделения ячеек как в Excel
 
 2. УСТАНОВКА ПЛАГИНОВ:
 ❶ Автоматическая установка:
@@ -1060,8 +1671,23 @@ class RenamerApp:
 3. УПРАВЛЕНИЕ МОНИТОРИНГОМ:
 - Зеленая кнопка "ВКЛ" - мониторинг активен
 - Красная кнопка "ВЫКЛ" - мониторинг остановлен
+- При запуске мониторинга программа НЕ переименовывает существующие файлы
+- Переименовываются только новые файлы, появляющиеся в папке после запуска мониторинга
 
-4. ШАБЛОНЫ ИМЕН:
+4. ОТЧЕТ О ПЕРЕИМЕНОВАННЫХ ФАЙЛАХ:
+- В правой части отображается таблица с исходными и новыми именами
+- ВОЗМОЖНОСТИ ВЫДЕЛЕНИЯ КАК В EXCEL:
+  * Выделение отдельных ячеек (клик по ячейке)
+  * Выделение диапазона ячеек (перетаскивание)
+  * Выделение строк (клик по номеру строки)
+  * Выделение столбцов (клик по заголовку столбца)
+  * Множественное выделение (Ctrl+клик)
+  * Выделение прямоугольных областей (Shift+клик)
+- Копирование выделенных данных в буфер обмена (Ctrl+C)
+- Фильтр по маршруту позволяет отображать только нужные файлы
+- Управление колонками: можно скрывать ненужные колонки
+
+5. ШАБЛОНЫ ИМЕН:
 Доступные переменные:
 {project} - название проекта
 {route} - маршрут
@@ -1071,8 +1697,7 @@ class RenamerApp:
 {extension} - расширение файла
 {1}, {2}, {3} - дополнительные переменные
 
-5. ТЕХНИЧЕСКАЯ ПОДДЕРЖКА:
-https://github.com/DreamMaster-x
+6. ТЕХНИЧЕСКАЯ ПОДДЕРЖКА:
 Telegram: @xDream_Master
 Email: drea_m_aster@vk.com"""
     
@@ -1080,7 +1705,7 @@ Email: drea_m_aster@vk.com"""
     
     def show_info(self):
         """Показать информацию о программе"""
-        info_text = f"""EGOK Renamer v3.1
+        info_text = f"""EGOK Renamer v3.8.1
 
 {self.developer_info}
 
@@ -1088,12 +1713,25 @@ Email: drea_m_aster@vk.com"""
 - Telegram: @xDream_Master
 - Email: drea_m_aster@vk.com
 
-НОВЫЕ ФУНКЦИИ ВЕРСИИ 3.1:
-- Объединенный интерфейс "ЭГОК" с настройками и логами
-- Регулируемый разделитель между настройками и логами
-- Модульная архитектура с поддержкой плагинов
-- История папок и шаблонов
-- Цветной переключатель мониторинга
+НОВЫЕ ФУНКЦИИ ВЕРСИИ 3.8.1:
+- ИСПРАВЛЕН БАГ: Программа больше не падает при переименовании второго файла
+- УЛУЧШЕННАЯ ОБРАБОТКА ОШИБОК: Добавлена защита от критических сбоев
+- БЕЗОПАСНАЯ РАБОТА С ФАЙЛАМИ: Добавлены задержки и блокировки для предотвращения конфликтов
+- УЛУЧШЕННЫЙ ОТЧЕТ С ВОЗМОЖНОСТЬЮ ВЫДЕЛЕНИЯ ЯЧЕЕК КАК В EXCEL:
+  * Выделение отдельных ячеек, строк, столбцов
+  * Выделение прямоугольных областей
+  * Множественное выделение (Ctrl+клик)
+  * Горячие клавиши: Ctrl+C для копирования
+  * Изменение ширины колонок и высоты строк
+  * Сортировка по колонкам
+  * Контекстное меню с полным набором функций
+  * Экспорт в CSV (совместимый с Excel)
+- Программа переименовывает ТОЛЬКО НОВЫЕ файлы при мониторинге
+- Убрана функция переименования существующих файлов при запуске
+- Сохранение истории переименованных файлов (файл renamed_files.json)
+- Умная нумерация с учетом ранее переименованных файлов
+- Логи сохраняются в папку logs с датой и временем
+- Защита от повторного переименования файлов
 
 СИСТЕМА ПЛАГИНОВ:
 Разработчики могут добавлять новые функции через плагины:
@@ -1107,6 +1745,7 @@ Email: drea_m_aster@vk.com"""
 - Гибкие настройки шаблонов
 - Фильтрация файлов по расширениям
 - Подробное логирование с цветным выделением
+- Отчет о переименованных файлах
 
 © 2024 Все права защищены."""
 
@@ -1116,10 +1755,25 @@ Email: drea_m_aster@vk.com"""
         """Обработка закрытия программы"""
         if self.monitor:
             self.stop_monitoring()
+        # Сохраняем историю переименований при закрытии
+        self.renamed_files_manager.save_history()
         self.root.destroy()
 
 def main():
     """Главная функция"""
+    # Добавляем обработку непойманных исключений
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        
+        logging.critical("Необработанное исключение:", exc_info=(exc_type, exc_value, exc_traceback))
+        messagebox.showerror("Критическая ошибка", 
+                           f"Произошла критическая ошибка:\n{exc_value}\n\n"
+                           f"Подробности в файле лога.")
+    
+    sys.excepthook = handle_exception
+    
     root = tk.Tk()
     app = RenamerApp(root)
     

@@ -83,7 +83,17 @@ pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
 --hidden-import=importlib.machinery ^
 --hidden-import=requests ^
 --hidden-import=json ^
+--hidden-import=tksheet ^
+--hidden-import=tksheet._tksheet ^
+--hidden-import=tksheet._tksheet_formatters ^
+--hidden-import=tksheet._tksheet_other ^
+--hidden-import=tksheet._tksheet_main_table ^
+--hidden-import=tksheet._tksheet_top_left_rectangle ^
+--hidden-import=tksheet._tksheet_row_index ^
+--hidden-import=tksheet._tksheet_header ^
+--hidden-import=tksheet._tksheet_column_drag_and_drop ^
 --collect-all=plugins ^
+--collect-all=tksheet ^
 main.py
 
 if errorlevel 1 (
@@ -112,6 +122,17 @@ echo - background.png (рядом с EXE)
 echo - settings.json (рядом с EXE)
 echo - icon.ico (рядом с EXE, если используется)
 echo - plugins/ (папка с плагинами)
+echo.
+echo НОВЫЕ ФУНКЦИИ ВЕРСИИ 3.8:
+echo 1. ПОЛНОЦЕННЫЙ EXCEL-ПОДОБНЫЙ ОТЧЕТ
+echo 2. Выделение отдельных ячеек, строк, столбцов
+echo 3. Выделение прямоугольных областей
+echo 4. Множественное выделение (Ctrl+клик)
+echo 5. Горячие клавиши: Ctrl+C, Ctrl+A
+echo 6. Изменение ширины колонок и высоты строк
+echo 7. Сортировка по колонкам
+echo 8. Контекстное меню с полным набором функций
+echo 9. Экспорт в CSV (совместимый с Excel)
 echo.
 echo РАЗРАБОТЧИКАМ ПЛАГИНОВ:
 echo 1. Создайте файл .py в папке plugins/
