@@ -22,7 +22,7 @@
     "{route}_{date}_{counter}_{project}"
   ],
   "enabled_plugins": [
-    "example_plugin"
+    "example_plugin", "photo_merge_plugin", "file_generator_plugin"]
   ],
   "combobox_values": {
     "project": [

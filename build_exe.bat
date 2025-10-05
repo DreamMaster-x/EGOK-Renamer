@@ -44,9 +44,9 @@ if not exist "plugins\example_plugin.py" (
     type nul > plugins\example_plugin.py
 )
 
-if not exist "plugins\telegram_sender.py" (
-    echo Создаем плагин Telegram отправки...
-    type nul > plugins\telegram_sender.py
+if not exist "plugins\file_generator_plugin.py" (
+    echo Создаем плагин генератора файлов...
+    type nul > plugins\file_generator_plugin.py
 )
 
 :: Проверяем наличие иконки
@@ -73,6 +73,9 @@ pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
 --hidden-import=watchdog.events ^
 --hidden-import=PIL ^
 --hidden-import=PIL._tkinter_finder ^
+--hidden-import=PIL.Image ^
+--hidden-import=PIL.ImageDraw ^
+--hidden-import=PIL.ImageFont ^
 --hidden-import=threading ^
 --hidden-import=queue ^
 --hidden-import=pathlib ^
@@ -94,6 +97,7 @@ pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
 --hidden-import=tksheet._tksheet_column_drag_and_drop ^
 --collect-all=plugins ^
 --collect-all=tksheet ^
+--collect-all=PIL ^
 main.py
 
 if errorlevel 1 (
@@ -123,21 +127,8 @@ echo - settings.json (рядом с EXE)
 echo - icon.ico (рядом с EXE, если используется)
 echo - plugins/ (папка с плагинами)
 echo.
-echo НОВЫЕ ФУНКЦИИ ВЕРСИИ 3.8:
-echo 1. ПОЛНОЦЕННЫЙ EXCEL-ПОДОБНЫЙ ОТЧЕТ
-echo 2. Выделение отдельных ячеек, строк, столбцов
-echo 3. Выделение прямоугольных областей
-echo 4. Множественное выделение (Ctrl+клик)
-echo 5. Горячие клавиши: Ctrl+C, Ctrl+A
-echo 6. Изменение ширины колонок и высоты строк
-echo 7. Сортировка по колонкам
-echo 8. Контекстное меню с полным набором функций
-echo 9. Экспорт в CSV (совместимый с Excel)
-echo.
-echo РАЗРАБОТЧИКАМ ПЛАГИНОВ:
-echo 1. Создайте файл .py в папке plugins/
-echo 2. Унаследуйтесь от BasePlugin
-echo 3. Реализуйте методы get_tab_name() и create_tab()
-echo 4. Добавьте имя плагина в enabled_plugins в settings.json
+echo НОВЫЕ ФУНКЦИИ:
+echo 1. ПЛАГИН ГЕНЕРАТОРА ФАЙЛОВ - создает тестовые файлы
+echo 2. Требует установленный Pillow (PIL) для генерации изображений
 echo.
 pause
