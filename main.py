@@ -404,15 +404,35 @@ class RenamerApp:
         # Создаем имя файла с датой
         log_filename = os.path.join(log_dir, f"renamer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
         
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_filename, encoding='utf-8'),
-                logging.StreamHandler()
-            ]
-        )
-        logging.info(f"Логирование запущено: {log_filename}")
+        # Настраиваем корневой логгер
+        self.logger = logging.getLogger()
+        self.logger.setLevel(logging.INFO)
+        
+        # Очищаем существующие обработчики
+        for handler in self.logger.handlers[:]:
+            self.logger.removeHandler(handler)
+        
+        # Создаем форматтер
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+        
+        # Обработчик для файла
+        file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(formatter)
+        
+        # Обработчик для консоли
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        
+        # Добавляем обработчики
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(console_handler)
+        
+        logging.info("=" * 50)
+        logging.info("ПРОГРАММА ЗАПУЩЕНА")
+        logging.info("=" * 50)
+        logging.info(f"Логирование инициализировано: {log_filename}")
     
     def create_widgets(self):
         """Создание интерфейса"""
@@ -680,6 +700,8 @@ class RenamerApp:
         self.log_text.tag_configure("black", foreground="black")
         self.log_text.tag_configure("gray", foreground="gray")
         self.log_text.tag_configure("error", foreground="red")
+        self.log_text.tag_configure("warning", foreground="orange")
+        self.log_text.tag_configure("info", foreground="blue")
         
         scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
@@ -1241,6 +1263,7 @@ class RenamerApp:
             # Сбрасываем фильтр
             self.route_filter_var.set("Все")
             self.current_route_filter = "Все"
+            logging.info("Отчет о переименованных файлах очищен")
     
     def export_report(self):
         """Экспорт отчета в файл"""
@@ -1288,19 +1311,20 @@ class RenamerApp:
                                 f.write(f"{values[0]}\t{values[1]}\t{values[2]}\t{values[3]}\t{values[4]}\n")
                 
                 messagebox.showinfo("Успех", f"Отчет экспортирован в файл:\n{file_path}")
+                logging.info(f"Отчет экспортирован в файл: {file_path}")
             except Exception as e:
+                logging.error(f"Ошибка экспорта отчета: {e}")
                 messagebox.showerror("Ошибка", f"Ошибка экспорта отчета: {e}")
     
-    def add_to_report(self, original_name, new_name, filepath):
+    def add_to_report(self, original_name, new_name, filepath, create_time=None):
         """Добавление записи в отчет о переименовании"""
-        # Получаем время создания файла до переименования
-        try:
-            # Используем исходный путь к файлу до переименования
-            create_time = datetime.fromtimestamp(os.path.getctime(filepath)).strftime('%H:%M:%S')
-        except Exception as e:
-            logging.error(f"Ошибка получения времени создания файла {filepath}: {e}")
-            # Если не удалось получить время создания, используем текущее время
-            create_time = datetime.now().strftime('%H:%M:%S')
+        # Если время не передано, пытаемся получить из файла
+        if create_time is None:
+            try:
+                create_time = datetime.fromtimestamp(os.path.getctime(filepath)).strftime('%H:%M:%S')
+            except Exception as e:
+                logging.error(f"Ошибка получения времени создания файла {filepath}: {e}")
+                create_time = datetime.now().strftime('%H:%M:%S')
         
         # Получаем текущий маршрут из настроек
         route = self.settings.settings["route"]
@@ -1336,6 +1360,9 @@ class RenamerApp:
             
             # Автоматически прокручиваем к последней записи
             self.report_tree.see(item_id)
+        
+        # Логируем добавление в отчет
+        logging.info(f"Добавлено в отчет: {original_name} -> {new_name}")
     
     def apply_column_visibility(self):
         """Применить настройки видимости колонок"""
@@ -1400,6 +1427,8 @@ class RenamerApp:
                     else:
                         # Скрываем элемент (но не удаляем)
                         self.report_tree.detach(item)
+        
+        logging.info(f"Применен фильтр по маршруту: {selected_route}")
     
     def create_combobox_row(self, parent, label, key, row):
         """Создание строки с Combobox"""
@@ -1488,6 +1517,7 @@ class RenamerApp:
             # Применяем изменения
             self.apply_column_visibility()
             dialog.destroy()
+            logging.info("Настройки видимости колонок сохранены")
         
         def reset_columns():
             # Сбрасываем настройки к значениям по умолчанию
@@ -1496,6 +1526,7 @@ class RenamerApp:
             self.column_order = ["number", "create_time", "route", "original_name", "new_name"]
             self.apply_column_visibility()
             dialog.destroy()
+            logging.info("Настройки видимости колонок сброшены к значениям по умолчанию")
         
         # Фрейм для кнопок
         buttons_frame = ttk.Frame(main_frame)
@@ -1600,6 +1631,7 @@ class RenamerApp:
             new_enabled = [name for name, var in plugin_vars.items() if var.get()]
             self.settings.update_setting("enabled_plugins", new_enabled)
             messagebox.showinfo("Успех", "Настройки плагинов сохранены!\nПерезапустите программу для применения изменений.")
+            logging.info("Настройки плагинов сохранены")
             dialog.destroy()
         
         ttk.Button(main_frame, text="Сохранить", command=save_plugins).pack(pady=10)
@@ -1662,8 +1694,11 @@ class RenamerApp:
         try:
             example = self.generate_filename("example.jpg")
             messagebox.showinfo("Проверка шаблона", f"Пример имени файла:\n{example}")
+            logging.info(f"Проверка шаблона: {example}")
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка в шаблоне: {e}")
+            error_msg = f"Ошибка в шаблоне: {e}"
+            logging.error(error_msg)
+            messagebox.showerror("Ошибка", error_msg)
     
     def update_combobox_value(self, key):
         """Обновление значения Combobox"""
@@ -1675,6 +1710,8 @@ class RenamerApp:
             if value not in self.settings.settings["combobox_values"][key]:
                 self.settings.settings["combobox_values"][key].append(value)
                 self.settings.save_settings()
+            
+            logging.info(f"Настройка '{key}' изменена на: {value}")
     
     def save_settings(self):
         """Сохранение настроек"""
@@ -1700,8 +1737,11 @@ class RenamerApp:
                 self.settings.update_setting("rename_only_today", rename_only_today)
             
             messagebox.showinfo("Успех", "Настройки сохранены!")
+            logging.info("Настройки программы сохранены")
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка сохранения: {e}")
+            error_msg = f"Ошибка сохранения: {e}"
+            logging.error(error_msg)
+            messagebox.showerror("Ошибка", error_msg)
     
     def update_monitoring_button(self):
         """Обновление внешнего вида кнопки мониторинга"""
@@ -1714,8 +1754,10 @@ class RenamerApp:
         """Переключение мониторинга"""
         if self.monitor and self.monitor.is_monitoring:
             self.stop_monitoring()
+            logging.info("Мониторинг отключен пользователем")
         else:
             self.start_monitoring()
+            logging.info("Мониторинг включен пользователем")
         self.update_monitoring_button()
 
     def start_monitoring(self):
@@ -1732,6 +1774,7 @@ class RenamerApp:
             # УБРАН ВЫЗОВ ПЕРЕИМЕНОВАНИЯ СУЩЕСТВУЮЩИХ ФАЙЛОВ
             logging.info("Мониторинг запущен (без переименования существующих файлов)")
         else:
+            logging.error("Не удалось запустить мониторинг")
             messagebox.showerror("Ошибка", "Не удалось запустить мониторинг")
 
     def stop_monitoring(self):
@@ -1869,17 +1912,17 @@ class RenamerApp:
                             logging.info(f"Файл {filepath} уже был переименован программой, пропускаем")
                             continue
                         
-                        # Получаем время создания файла ДО переименования
+                        # Получаем время создания файла ДО переименования                      
                         try:
                             create_time = datetime.fromtimestamp(os.path.getctime(filepath)).strftime('%H:%M:%S')
                         except Exception as e:
                             logging.error(f"Ошибка получения времени создания файла {filepath}: {e}")
                             create_time = datetime.now().strftime('%H:%M:%S')
-                        
+
                         original_name = Path(filepath).name
                         new_name = self.generate_filename(filepath, current_counter)
                         new_path = os.path.join(folder, new_name)
-                        
+
                         # Проверяем, не переименован ли уже файл
                         if not os.path.exists(new_path):
                             # Добавляем задержку для гарантии, что файл полностью доступен
@@ -1890,7 +1933,7 @@ class RenamerApp:
                             self.log_queue.put(log_message)
                             
                             # Добавляем в отчет с временем создания
-                            self.root.after(0, lambda: self.add_to_report(original_name, new_name, filepath))
+                            self.root.after(0, lambda ct=create_time: self.add_to_report(original_name, new_name, filepath, ct))
                             
                             # Добавляем файл в историю переименований
                             self.renamed_files_manager.add_renamed_file(filepath)
@@ -1911,7 +1954,7 @@ class RenamerApp:
                             self.log_queue.put(log_message)
                             
                             # Добавляем в отчет с временем создания
-                            self.root.after(0, lambda: self.add_to_report(original_name, new_name, filepath))
+                            self.root.after(0, lambda ct=create_time: self.add_to_report(original_name, new_name, filepath, ct))
                             
                             # Добавляем файл в историю переименований
                             self.renamed_files_manager.add_renamed_file(filepath)
@@ -1954,6 +1997,10 @@ class RenamerApp:
                 # Определяем цвет для текущей строки
                 if "ОШИБКА" in message:
                     color_tag = "error"
+                elif "ПРЕДУПРЕЖДЕНИЕ" in message or "WARNING" in message:
+                    color_tag = "warning"
+                elif "ИНФОРМАЦИЯ" in message or "INFO" in message:
+                    color_tag = "info"
                 elif self.log_line_counter % 2 == 0:
                     color_tag = "black"
                 else:
@@ -2020,6 +2067,7 @@ Telegram: @xDream_Master
 Email: drea_m_aster@vk.com"""
     
         messagebox.showinfo("Справка", help_text)
+        logging.info("Открыта справка")
     
     def show_info(self):
         """Показать информацию о программе"""
@@ -2055,9 +2103,14 @@ Email: drea_m_aster@vk.com"""
 © 2024 Все права защищены."""
     
         messagebox.showinfo("О программе", info_text)
+        logging.info("Открыта информация о программе")
     
     def on_closing(self):
         """Обработка закрытия программы"""
+        logging.info("=" * 50)
+        logging.info("ЗАВЕРШЕНИЕ РАБОТЫ ПРОГРАММЫ")
+        logging.info("=" * 50)
+        
         if self.monitor:
             self.stop_monitoring()
         # Сохраняем историю переименований при закрытии
