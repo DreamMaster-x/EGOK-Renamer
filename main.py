@@ -18,6 +18,9 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from PIL import Image, ImageTk
 
+# Версия программы
+VERSION = "3.9.0"
+
 # Проверяем наличие tksheet
 try:
     import tksheet
@@ -322,7 +325,7 @@ class RenamerApp:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("EGOK Renamer")
+        self.root.title(f"EGOK Renamer v{VERSION}")
         self.root.geometry("1200x800")
         
         # Установка иконки приложения
@@ -458,7 +461,7 @@ class RenamerApp:
         title_frame = ttk.Frame(header_frame)
         title_frame.pack(side=tk.LEFT, fill=tk.Y)
         
-        title_label = ttk.Label(title_frame, text="EGOK Renamer", font=('Arial', 16, 'bold'))
+        title_label = ttk.Label(title_frame, text=f"EGOK Renamer v{VERSION}", font=('Arial', 16, 'bold'))
         title_label.pack(anchor=tk.W)
         
         developer_label = ttk.Label(title_frame, text=self.developer_info, font=('Arial', 8), foreground="gray")
@@ -575,6 +578,14 @@ class RenamerApp:
         settings_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
+        # Кнопки управления - ПЕРЕМЕЩЕНЫ ВВЕРХ
+        button_frame = ttk.Frame(scrollable_frame)
+        button_frame.pack(pady=10, fill=tk.X)
+        
+        ttk.Button(button_frame, text="Сохранить настройки", command=self.save_settings).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Управление плагинами", command=self.show_plugins_dialog).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Установить плагин", command=self.install_plugin_dialog).pack(side=tk.LEFT, padx=5)
+        
         self.create_combobox_row(scrollable_frame, "Проект:", "project", 0)
         self.create_combobox_row(scrollable_frame, "Тип ЦН:", "tl_type", 1)
         self.create_combobox_row(scrollable_frame, "Маршрут:", "route", 2)
@@ -684,14 +695,6 @@ class RenamerApp:
             variable=self.rename_only_today_var
         )
         rename_only_today_cb.pack(anchor=tk.W)
-        
-        # Кнопки управления
-        button_frame = ttk.Frame(scrollable_frame)
-        button_frame.pack(pady=10, fill=tk.X)
-        
-        ttk.Button(button_frame, text="Сохранить настройки", command=self.save_settings).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Управление плагинами", command=self.show_plugins_dialog).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Установить плагин", command=self.install_plugin_dialog).pack(side=tk.LEFT, padx=5)
     
     def create_log_content(self, parent):
         """Создание содержимого логов"""
@@ -1471,7 +1474,7 @@ class RenamerApp:
         ttk.Button(footer_frame, text="i", width=3, command=self.show_info).pack(side=tk.LEFT, padx=5)
         
         # Добавляем информацию о поддержке в нижний колонтитул
-        support_label = ttk.Label(footer_frame, text=self.developer_info, foreground="gray", font=('Arial', 8))
+        support_label = ttk.Label(footer_frame, text=f"{self.developer_info} | Версия: {VERSION}", foreground="gray", font=('Arial', 8))
         support_label.pack(side=tk.RIGHT, padx=5)
     
     def show_column_management_dialog(self):
@@ -2021,7 +2024,7 @@ class RenamerApp:
     
     def show_help(self):
         """Показать справку"""
-        help_text = """УЛУЧШЕННОЕ УПРАВЛЕНИЕ ОТЧЕТОМ:
+        help_text = f"""УЛУЧШЕННОЕ УПРАВЛЕНИЕ ОТЧЕТОМ:
 
 ВКЛАДКА ОТЧЕТА ТЕПЕРЬ ПОДДЕРЖИВАЕТ:
 ✓ ВЫДЕЛЕНИЕ ОТДЕЛЬНЫХ ЯЧЕЕК - клик по ячейке
@@ -2064,18 +2067,19 @@ Delete - Очистить выделенные ячейки
 
 ТЕХНИЧЕСКАЯ ПОДДЕРЖКА:
 Telegram: @xDream_Master
-Email: drea_m_aster@vk.com"""
+Email: drea_m_aster@vk.com
+Версия: {VERSION}"""
     
         messagebox.showinfo("Справка", help_text)
         logging.info("Открыта справка")
     
     def show_info(self):
         """Показать информацию о программе"""
-        info_text = f"""EGOK Renamer v3.9.0
+        info_text = f"""EGOK Renamer v{VERSION}
 
 {self.developer_info}
 
-ОСНОВНЫЕ УЛУЧШЕНИЯ ВЕРСИИ 3.9.0:
+ОСНОВНЫЕ УЛУЧШЕНИЯ ВЕРСИИ {VERSION}:
 
 🎯 УЛУЧШЕННОЕ УПРАВЛЕНИЕ ОТЧЕТОМ:
 • Excel-подобное выделение ячеек, строк и столбцов
