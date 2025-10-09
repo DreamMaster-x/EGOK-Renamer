@@ -19,7 +19,7 @@ from watchdog.events import FileSystemEventHandler
 from PIL import Image, ImageTk
 
 # Версия программы
-VERSION = "3.9.3"
+VERSION = "3.9.4"
 
 # Проверяем наличие tksheet
 try:
@@ -74,7 +74,7 @@ class TemplateBuilderDialog:
         # Группы переменных
         self.create_variable_group(variables_frame, "Основные переменные:", [
             ("{project}", "Проект", self.settings.settings["project"]),
-            ("{TL}", "Тип ЦН", self.settings.settings["tl_type"]),
+            ("{CN}", "Тип ЦН", self.settings.settings["cn_type"]),  # ИЗМЕНЕНО: {TL} на {CN}
             ("{route}", "Маршрут", self.settings.settings["route"]),
             ("{date}", "Дата", self.format_date_example()),
             ("{counter}", "Счетчик", "001"),
@@ -131,7 +131,7 @@ class TemplateBuilderDialog:
         preview_frame = ttk.LabelFrame(right_frame, text="Предпросмотр имени файла", padding="10")
         preview_frame.pack(fill=tk.BOTH, expand=True)
         
-        self.preview_var = tk.StringVar(value="Пример: project_20231201_route_001_VK.jpg")
+        self.preview_var = tk.StringVar(value="Пример: project_20231201_route_001_CN.jpg")  # ИЗМЕНЕНО: VK на CN
         preview_label = ttk.Label(preview_frame, textvariable=self.preview_var, 
                                  wraplength=400, justify=tk.LEFT)
         preview_label.pack(fill=tk.BOTH, expand=True)
@@ -211,7 +211,7 @@ class TemplateBuilderDialog:
     
     def reset_to_default(self):
         """Сброс к стандартному шаблону"""
-        default_template = "{project}_{date}_{route}_{counter}_{TL}"
+        default_template = "{project}_{date}_{route}_{counter}_{CN}"  # ИЗМЕНЕНО: {TL} на {CN}
         self.template_text.delete("1.0", tk.END)
         self.template_text.insert("1.0", default_template)
         self.update_preview()
@@ -236,7 +236,7 @@ class TemplateBuilderDialog:
             # Заменяем переменные на примеры значений
             preview = template
             preview = preview.replace("{project}", self.settings.settings["project"])
-            preview = preview.replace("{TL}", self.settings.settings["tl_type"])
+            preview = preview.replace("{CN}", self.settings.settings["cn_type"])  # ИЗМЕНЕНО: {TL} на {CN}
             preview = preview.replace("{route}", self.settings.settings["route"])
             
             # Форматируем дату по выбранному формату
@@ -327,16 +327,16 @@ class Settings:
         self.filename = filename
         self.default_settings = {
             "project": "Проект1",
-            "tl_type": "VK",
+            "cn_type": "VK",
             "route": "M2.1",
             "number_format": "01",
-            "date_format": "ГГГГММДД",  # НОВОЕ ПОЛЕ: формат даты
+            "date_format": "ГГГГММДД",
             "var1": "Значение1",
             "var2": "Значение2",
             "var3": "Значение3",
             "folder": r"C:\video\violations",
             "extensions": "png,jpg,jpeg",
-            "template": "{project}_{date}_{route}_{counter}_{TL}",
+            "template": "{project}_{date}_{route}_{counter}_{CN}",  # ИЗМЕНЕНО: {TL} на {CN}
             "monitoring_enabled": True,
             "rename_only_today": True,
             "folder_history": [
@@ -345,17 +345,17 @@ class Settings:
                 r"D:\projects\images"
             ],
             "template_history": [
-                "{project}_{date}_{route}_{counter}_{TL}",
-                "{project}_{TL}_{date}_{counter}",
+                "{project}_{date}_{route}_{counter}_{CN}",  # ИЗМЕНЕНО: {TL} на {CN}
+                "{project}_{CN}_{date}_{counter}",  # ИЗМЕНЕНО: {TL} на {CN}
                 "{route}_{date}_{counter}_{project}"
             ],
             "enabled_plugins": ["example_plugin"],
             "combobox_values": {
                 "project": ["Проект1", "Проект2"],
-                "tl_type": ["VK", "Другой"],
+                "cn_type": ["VK", "Другой"],
                 "route": ["M2.1", "M2.2", "M2.3"],
                 "number_format": ["1", "01", "001"],
-                "date_format": ["ДДММГГГГ", "ДДММГГ", "ГГГГММДД", "ДД.ММ.ГГГГ", "ДД.ММ.ГГ", "ГГГГ.ММ.ДД"],  # НОВЫЕ ЗНАЧЕНИЯ
+                "date_format": ["ДДММГГГГ", "ДДММГГ", "ГГГГММДД", "ДД.ММ.ГГГГ", "ДД.ММ.ГГ", "ГГГГ.ММ.ДД"],
                 "var1": ["Значение1", "Значение2"],
                 "var2": ["Значение1", "Значение2"],
                 "var3": ["Значение1", "Значение2"]
@@ -370,6 +370,20 @@ class Settings:
                 with open(self.filename, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
                     # Объединяем с настройками по умолчанию для совместимости
+                    # Обеспечиваем обратную совместимость: если есть старый tl_type, копируем его в cn_type
+                    if "tl_type" in loaded_settings and "cn_type" not in loaded_settings:
+                        loaded_settings["cn_type"] = loaded_settings["tl_type"]
+                    
+                    # Обновляем шаблоны в истории для обратной совместимости
+                    if "template_history" in loaded_settings:
+                        for i, template in enumerate(loaded_settings["template_history"]):
+                            if "{TL}" in template:
+                                loaded_settings["template_history"][i] = template.replace("{TL}", "{CN}")
+                    
+                    # Обновляем основной шаблон для обратной совместимости
+                    if "template" in loaded_settings and "{TL}" in loaded_settings["template"]:
+                        loaded_settings["template"] = loaded_settings["template"].replace("{TL}", "{CN}")
+                    
                     self.settings = {**self.default_settings, **loaded_settings}
             else:
                 self.settings = self.default_settings
@@ -858,10 +872,10 @@ class RenamerApp:
         self.update_monitoring_button()
         
         self.create_combobox_row(scrollable_frame, "Проект:", "project", 0)
-        self.create_combobox_row(scrollable_frame, "Тип ЦН:", "tl_type", 1)
+        self.create_combobox_row(scrollable_frame, "Тип ЦН:", "cn_type", 1)  # ИЗМЕНЕНО: tl_type на cn_type
         self.create_combobox_row(scrollable_frame, "Маршрут:", "route", 2)
         self.create_combobox_row(scrollable_frame, "Формат номера:", "number_format", 3)
-        self.create_combobox_row(scrollable_frame, "Формат даты:", "date_format", 4)  # НОВОЕ ПОЛЕ
+        self.create_combobox_row(scrollable_frame, "Формат даты:", "date_format", 4)
         self.create_combobox_row(scrollable_frame, "Переменная 1:", "var1", 5)
         self.create_combobox_row(scrollable_frame, "Переменная 2:", "var2", 6)
         self.create_combobox_row(scrollable_frame, "Переменная 3:", "var3", 7)
@@ -1724,10 +1738,10 @@ class RenamerApp:
         # Подсказка
         hints = {
             "project": "{project}",
-            "tl_type": "{TL}",
+            "cn_type": "{CN}",  # ИЗМЕНЕНО: {TL} на {CN}
             "route": "{route}",
             "number_format": "{counter}",
-            "date_format": "{date}",  # НОВАЯ ПОДСКАЗКА
+            "date_format": "{date}",
             "var1": "{1}",
             "var2": "{2}",
             "var3": "{3}"
@@ -2106,7 +2120,7 @@ class RenamerApp:
         # Заменяем переменные в шаблоне
         filename = self.settings.settings["template"]
         filename = filename.replace("{project}", self.settings.settings["project"])
-        filename = filename.replace("{TL}", self.settings.settings["tl_type"])
+        filename = filename.replace("{CN}", self.settings.settings["cn_type"])  # ИЗМЕНЕНО: {TL} на {CN}
         filename = filename.replace("{route}", self.settings.settings["route"])
         filename = filename.replace("{date}", formatted_date)
         filename = filename.replace("{counter}", counter_str)
@@ -2134,7 +2148,7 @@ class RenamerApp:
         # Создаем шаблон для поиска файлов с текущей датой и форматом
         pattern = re.compile(
             f"{re.escape(self.settings.settings['project'])}_{escaped_date}_"
-            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['tl_type'])}"
+            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['cn_type'])}"  # ИЗМЕНЕНО: tl_type на cn_type
         )
         
         max_counter = 0
@@ -2163,7 +2177,7 @@ class RenamerApp:
         
         pattern = re.compile(
             f"{re.escape(self.settings.settings['project'])}_{escaped_date}_"
-            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['tl_type'])}"
+            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['cn_type'])}"  # ИЗМЕНЕНО: tl_type на cn_type
         )
         
         # Проверяем файлы в папке, которые уже соответствуют шаблону
@@ -2292,7 +2306,7 @@ class RenamerApp:
         
         pattern = re.compile(
             f"{re.escape(self.settings.settings['project'])}_{escaped_date}_"
-            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['tl_type'])}"
+            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['cn_type'])}"  # ИЗМЕНЕНО: tl_type на cn_type
         )
         return pattern.match(filename) is not None
 
@@ -2385,6 +2399,9 @@ Delete - Очистить выделенные ячейки
 - Доступные форматы: ДДММГГГГ, ДДММГГ, ГГГГММДД, ДД.ММ.ГГГГ, ДД.ММ.ГГ, ГГГГ.ММ.ДД
 - Автоматическое применение выбранного формата
 
+ОБНОВЛЕННЫЕ ПЕРЕМЕННЫЕ ШАБЛОНА:
+- {CN} - Тип ЦН (ранее {{TL}})
+
 ОСНОВНЫЕ ФУНКЦИИ ПРОГРАММЫ:
 - Автоматическое переименование НОВЫХ файлов
 - Мониторинг папки в реальном времени
@@ -2437,6 +2454,9 @@ Email: drea_m_aster@vk.com
 • 6 предустановленных форматов на выбор
 • Поддержка форматов с разделителями и без
 • Автоматическое применение ко всем новым файлам
+
+🔄 ОБНОВЛЕННЫЕ ПЕРЕМЕННЫЕ:
+• {CN} - Тип ЦН (ранее {{TL}})
 
 Техническая поддержка:
 - Telegram: @xDream_Master
