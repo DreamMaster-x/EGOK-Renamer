@@ -19,7 +19,7 @@ from watchdog.events import FileSystemEventHandler
 from PIL import Image, ImageTk
 
 # Версия программы
-VERSION = "3.9.0"
+VERSION = "3.9.1"
 
 # Проверяем наличие tksheet
 try:
@@ -377,6 +377,9 @@ class RenamerApp:
         # Запуск мониторинга если включен
         if self.settings.settings.get("monitoring_enabled", True):
             self.start_monitoring()
+        
+        # Обновляем состояние кнопки и вкладки после инициализации
+        self.update_monitoring_button()
     
     def set_app_icon(self):
         """Установка иконки приложения"""
@@ -506,11 +509,11 @@ class RenamerApp:
         self.notebook.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
         
         # Основная вкладка "ЭГОК" с настройками и логами
-        egok_tab = ttk.Frame(self.notebook)
-        self.notebook.add(egok_tab, text="ЭГОК")
+        self.egok_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.egok_tab, text="ЭГОК")
         
         # Создаем содержимое вкладки ЭГОК с новой структурой
-        self.create_egok_tab(egok_tab)
+        self.create_egok_tab(self.egok_tab)
         
         # Загружаем и создаем вкладки плагинов
         self.plugin_manager.load_plugins()
@@ -586,6 +589,29 @@ class RenamerApp:
         ttk.Button(button_frame, text="Управление плагинами", command=self.show_plugins_dialog).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Установить плагин", command=self.install_plugin_dialog).pack(side=tk.LEFT, padx=5)
         
+        # КНОПКА МОНИТОРИНГА ПЕРЕМЕЩЕНА СЮДА - В САМЫЙ ВЕРХ
+        monitoring_button_frame = ttk.Frame(button_frame)
+        monitoring_button_frame.pack(side=tk.LEFT, padx=20)
+        
+        ttk.Label(monitoring_button_frame, text="Мониторинг:").pack(side=tk.LEFT)
+        
+        # Создаем кастомный стиль для кнопки-переключателя
+        style = ttk.Style()
+        style.configure("Green.TButton", background="#4CAF50", foreground="#4CAF50")
+        style.configure("Red.TButton", background="#F44336", foreground="#F44336")
+        
+        self.monitoring_button = ttk.Button(
+            monitoring_button_frame, 
+            text="ВКЛ", 
+            style="Green.TButton",
+            command=self.toggle_monitoring,
+            width=8
+        )
+        self.monitoring_button.pack(side=tk.LEFT, padx=5)
+        
+        # Обновляем состояние кнопки при запуске
+        self.update_monitoring_button()
+        
         self.create_combobox_row(scrollable_frame, "Проект:", "project", 0)
         self.create_combobox_row(scrollable_frame, "Тип ЦН:", "tl_type", 1)
         self.create_combobox_row(scrollable_frame, "Маршрут:", "route", 2)
@@ -654,33 +680,6 @@ class RenamerApp:
         template_cb.bind('<FocusOut>', lambda e: self.on_template_selected())
         
         ttk.Button(template_frame, text="Проверить", command=self.check_template).pack(side=tk.LEFT)
-        
-        # Опции
-        options_frame = ttk.Frame(rename_frame)
-        options_frame.pack(fill=tk.X, pady=2)
-        
-        # Переключатель мониторинга с цветовой индикацией
-        monitoring_frame = ttk.Frame(options_frame)
-        monitoring_frame.pack(side=tk.LEFT, padx=5)
-        
-        ttk.Label(monitoring_frame, text="Мониторинг:").pack(side=tk.LEFT)
-        
-        # Создаем кастомный стиль для кнопки-переключателя
-        style = ttk.Style()
-        style.configure("Green.TButton", background="#4CAF50", foreground="#4CAF50")
-        style.configure("Red.TButton", background="#F44336", foreground="#F44336")
-        
-        self.monitoring_button = ttk.Button(
-            monitoring_frame, 
-            text="ВКЛ", 
-            style="Green.TButton",
-            command=self.toggle_monitoring,
-            width=8
-        )
-        self.monitoring_button.pack(side=tk.LEFT, padx=5)
-        
-        # Обновляем состояние кнопки при запуске
-        self.update_monitoring_button()
         
         # Опция переименовывать только сегодняшние файлы
         today_only_frame = ttk.Frame(rename_frame)
@@ -1747,11 +1746,15 @@ class RenamerApp:
             messagebox.showerror("Ошибка", error_msg)
     
     def update_monitoring_button(self):
-        """Обновление внешнего вида кнопки мониторинга"""
+        """Обновление внешнего вида кнопки мониторинга и вкладки"""
         if self.monitor and self.monitor.is_monitoring:
             self.monitoring_button.config(text="ВКЛ", style="Green.TButton")
+            # Изменяем текст вкладки "ЭГОК" с указанием статуса
+            self.notebook.tab(self.egok_tab, text="ЭГОК 🟢 ВКЛЮЧЕН")
         else:
             self.monitoring_button.config(text="ВЫКЛ", style="Red.TButton")
+            # Изменяем текст вкладки "ЭГОК" с указанием статуса
+            self.notebook.tab(self.egok_tab, text="ЭГОК 🔴 ВЫКЛЮЧЕН")
     
     def toggle_monitoring(self):
         """Переключение мониторинга"""
@@ -1779,6 +1782,8 @@ class RenamerApp:
         else:
             logging.error("Не удалось запустить мониторинг")
             messagebox.showerror("Ошибка", "Не удалось запустить мониторинг")
+        
+        self.update_monitoring_button()
 
     def stop_monitoring(self):
         """Остановка мониторинга"""
@@ -1788,6 +1793,8 @@ class RenamerApp:
             # Сохраняем настройку
             self.settings.update_setting("monitoring_enabled", False)
             logging.info("Мониторинг остановлен")
+        
+        self.update_monitoring_button()
     
     def generate_filename(self, filepath, counter=None):
         """Генерация имени файла по шаблону"""
