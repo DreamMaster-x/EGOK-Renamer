@@ -19,7 +19,7 @@ from watchdog.events import FileSystemEventHandler
 from PIL import Image, ImageTk
 
 # Версия программы
-VERSION = "3.9.1"
+VERSION = "3.9.3"
 
 # Проверяем наличие tksheet
 try:
@@ -28,6 +28,249 @@ try:
 except ImportError:
     TKSHEET_AVAILABLE = False
     logging.error("Библиотека tksheet не установлена. Отчет будет ограничен в функциях.")
+
+class TemplateBuilderDialog:
+    """Диалоговое окно для визуального построения шаблона"""
+    
+    def __init__(self, parent, current_template, settings):
+        self.parent = parent
+        self.current_template = current_template
+        self.settings = settings
+        self.result_template = None
+        
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("Конструктор шаблона имени файла")
+        self.dialog.geometry("700x500")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        self.dialog.resizable(True, True)
+        
+        # Центрирование диалога
+        self.dialog.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - self.dialog.winfo_width()) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - self.dialog.winfo_height()) // 2
+        self.dialog.geometry(f"+{x}+{y}")
+        
+        self.create_widgets()
+        self.update_preview()
+    
+    def create_widgets(self):
+        """Создание виджетов диалога"""
+        main_frame = ttk.Frame(self.dialog, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Левая часть - доступные переменные
+        left_frame = ttk.LabelFrame(main_frame, text="Доступные переменные", padding="10")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        
+        # Правая часть - предпросмотр и управление
+        right_frame = ttk.Frame(main_frame)
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
+        
+        # Список переменных
+        variables_frame = ttk.Frame(left_frame)
+        variables_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Группы переменных
+        self.create_variable_group(variables_frame, "Основные переменные:", [
+            ("{project}", "Проект", self.settings.settings["project"]),
+            ("{TL}", "Тип ЦН", self.settings.settings["tl_type"]),
+            ("{route}", "Маршрут", self.settings.settings["route"]),
+            ("{date}", "Дата", self.format_date_example()),
+            ("{counter}", "Счетчик", "001"),
+            ("{extension}", "Расширение файла", "jpg")
+        ])
+        
+        self.create_variable_group(variables_frame, "Пользовательские переменные:", [
+            ("{1}", "Переменная 1", self.settings.settings["var1"]),
+            ("{2}", "Переменная 2", self.settings.settings["var2"]),
+            ("{3}", "Переменная 3", self.settings.settings["var3"])
+        ])
+        
+        # Разделитель
+        ttk.Separator(variables_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        
+        # Статические элементы
+        static_frame = ttk.Frame(variables_frame)
+        static_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(static_frame, text="Статические элементы:").pack(anchor=tk.W)
+        
+        static_buttons_frame = ttk.Frame(static_frame)
+        static_buttons_frame.pack(fill=tk.X, pady=5)
+        
+        for text in ["-", "_", "(", ")", "[", "]"]:
+            btn = ttk.Button(static_buttons_frame, text=text, width=3,
+                           command=lambda t=text: self.insert_text(t))
+            btn.pack(side=tk.LEFT, padx=2)
+        
+        # Правая часть - редактирование шаблона
+        edit_frame = ttk.LabelFrame(right_frame, text="Редактирование шаблона", padding="10")
+        edit_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Текущий шаблон
+        ttk.Label(edit_frame, text="Текущий шаблон:").pack(anchor=tk.W)
+        
+        self.template_text = tk.Text(edit_frame, height=3, wrap=tk.WORD)
+        self.template_text.pack(fill=tk.X, pady=5)
+        self.template_text.insert("1.0", self.current_template)
+        
+        # Привязываем событие изменения текста
+        self.template_text.bind("<KeyRelease>", self.on_template_change)
+        
+        # Кнопки для быстрого редактирования
+        quick_buttons_frame = ttk.Frame(edit_frame)
+        quick_buttons_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(quick_buttons_frame, text="Очистить", 
+                  command=self.clear_template).pack(side=tk.LEFT, padx=2)
+        ttk.Button(quick_buttons_frame, text="Сбросить к стандарту", 
+                  command=self.reset_to_default).pack(side=tk.LEFT, padx=2)
+        
+        # Предпросмотр
+        preview_frame = ttk.LabelFrame(right_frame, text="Предпросмотр имени файла", padding="10")
+        preview_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.preview_var = tk.StringVar(value="Пример: project_20231201_route_001_VK.jpg")
+        preview_label = ttk.Label(preview_frame, textvariable=self.preview_var, 
+                                 wraplength=400, justify=tk.LEFT)
+        preview_label.pack(fill=tk.BOTH, expand=True)
+        
+        # История шаблонов
+        history_frame = ttk.LabelFrame(right_frame, text="История шаблонов", padding="10")
+        history_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        self.history_var = tk.StringVar()
+        history_combo = ttk.Combobox(history_frame, textvariable=self.history_var,
+                                    values=self.settings.settings.get("template_history", []))
+        history_combo.pack(fill=tk.X, pady=5)
+        history_combo.bind("<<ComboboxSelected>>", self.on_history_select)
+        
+        # Кнопки управления
+        button_frame = ttk.Frame(right_frame)
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        ttk.Button(button_frame, text="Сохранить", 
+                  command=self.save_template).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Применить", 
+                  command=self.apply_template).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Отмена", 
+                  command=self.dialog.destroy).pack(side=tk.RIGHT, padx=5)
+    
+    def format_date_example(self):
+        """Возвращает пример даты в текущем формате"""
+        date_format = self.settings.settings.get("date_format", "ГГГГММДД")
+        return self.format_date_by_format(datetime.now(), date_format)
+    
+    def format_date_by_format(self, date_obj, date_format):
+        """Форматирует дату по выбранному формату"""
+        format_mapping = {
+            "ДДММГГГГ": date_obj.strftime("%d%m%Y"),
+            "ДДММГГ": date_obj.strftime("%d%m%y"),
+            "ГГГГММДД": date_obj.strftime("%Y%m%d"),
+            "ДД.ММ.ГГГГ": date_obj.strftime("%d.%m.%Y"),
+            "ДД.ММ.ГГ": date_obj.strftime("%d.%m.%y"),
+            "ГГГГ.ММ.ДД": date_obj.strftime("%Y.%m.%d")
+        }
+        return format_mapping.get(date_format, date_obj.strftime("%Y%m%d"))
+    
+    def create_variable_group(self, parent, title, variables):
+        """Создание группы переменных"""
+        group_frame = ttk.Frame(parent)
+        group_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(group_frame, text=title, font=('Arial', 9, 'bold')).pack(anchor=tk.W)
+        
+        for var_code, var_name, example_value in variables:
+            var_frame = ttk.Frame(group_frame)
+            var_frame.pack(fill=tk.X, pady=2)
+            
+            # Кнопка для вставки переменной
+            btn = ttk.Button(var_frame, text=var_code, width=10,
+                           command=lambda v=var_code: self.insert_variable(v))
+            btn.pack(side=tk.LEFT, padx=(0, 5))
+            
+            # Описание переменной
+            desc_text = f"{var_name} (пример: {example_value})"
+            ttk.Label(var_frame, text=desc_text, font=('Arial', 8)).pack(side=tk.LEFT)
+    
+    def insert_variable(self, variable):
+        """Вставка переменной в шаблон"""
+        self.template_text.insert(tk.INSERT, variable)
+        self.update_preview()
+    
+    def insert_text(self, text):
+        """Вставка статического текста"""
+        self.template_text.insert(tk.INSERT, text)
+        self.update_preview()
+    
+    def clear_template(self):
+        """Очистка шаблона"""
+        self.template_text.delete("1.0", tk.END)
+        self.update_preview()
+    
+    def reset_to_default(self):
+        """Сброс к стандартному шаблону"""
+        default_template = "{project}_{date}_{route}_{counter}_{TL}"
+        self.template_text.delete("1.0", tk.END)
+        self.template_text.insert("1.0", default_template)
+        self.update_preview()
+    
+    def on_template_change(self, event=None):
+        """Обработка изменения шаблона"""
+        self.update_preview()
+    
+    def on_history_select(self, event=None):
+        """Выбор шаблона из истории"""
+        selected_template = self.history_var.get()
+        if selected_template:
+            self.template_text.delete("1.0", tk.END)
+            self.template_text.insert("1.0", selected_template)
+            self.update_preview()
+    
+    def update_preview(self):
+        """Обновление предпросмотра"""
+        try:
+            template = self.template_text.get("1.0", tk.END).strip()
+            
+            # Заменяем переменные на примеры значений
+            preview = template
+            preview = preview.replace("{project}", self.settings.settings["project"])
+            preview = preview.replace("{TL}", self.settings.settings["tl_type"])
+            preview = preview.replace("{route}", self.settings.settings["route"])
+            
+            # Форматируем дату по выбранному формату
+            date_format = self.settings.settings.get("date_format", "ГГГГММДД")
+            formatted_date = self.format_date_by_format(datetime.now(), date_format)
+            preview = preview.replace("{date}", formatted_date)
+            
+            preview = preview.replace("{counter}", "001")
+            preview = preview.replace("{extension}", "jpg")
+            preview = preview.replace("{1}", self.settings.settings["var1"])
+            preview = preview.replace("{2}", self.settings.settings["var2"])
+            preview = preview.replace("{3}", self.settings.settings["var3"])
+            
+            self.preview_var.set(f"Пример: {preview}")
+        except Exception as e:
+            self.preview_var.set(f"Ошибка в шаблоне: {e}")
+    
+    def get_template(self):
+        """Получение текущего шаблона"""
+        return self.template_text.get("1.0", tk.END).strip()
+    
+    def apply_template(self):
+        """Применение шаблона без закрытия диалога"""
+        template = self.get_template()
+        if template:
+            self.update_preview()
+            messagebox.showinfo("Успех", "Шаблон применен для предпросмотра", parent=self.dialog)
+    
+    def save_template(self):
+        """Сохранение шаблона"""
+        template = self.get_template()
+        if template:
+            self.result_template = template
+            self.dialog.destroy()
 
 class RenamedFilesManager:
     """Менеджер для хранения информации о переименованных файлах"""
@@ -87,6 +330,7 @@ class Settings:
             "tl_type": "VK",
             "route": "M2.1",
             "number_format": "01",
+            "date_format": "ГГГГММДД",  # НОВОЕ ПОЛЕ: формат даты
             "var1": "Значение1",
             "var2": "Значение2",
             "var3": "Значение3",
@@ -111,6 +355,7 @@ class Settings:
                 "tl_type": ["VK", "Другой"],
                 "route": ["M2.1", "M2.2", "M2.3"],
                 "number_format": ["1", "01", "001"],
+                "date_format": ["ДДММГГГГ", "ДДММГГ", "ГГГГММДД", "ДД.ММ.ГГГГ", "ДД.ММ.ГГ", "ГГГГ.ММ.ДД"],  # НОВЫЕ ЗНАЧЕНИЯ
                 "var1": ["Значение1", "Значение2"],
                 "var2": ["Значение1", "Значение2"],
                 "var3": ["Значение1", "Значение2"]
@@ -616,9 +861,10 @@ class RenamerApp:
         self.create_combobox_row(scrollable_frame, "Тип ЦН:", "tl_type", 1)
         self.create_combobox_row(scrollable_frame, "Маршрут:", "route", 2)
         self.create_combobox_row(scrollable_frame, "Формат номера:", "number_format", 3)
-        self.create_combobox_row(scrollable_frame, "Переменная 1:", "var1", 4)
-        self.create_combobox_row(scrollable_frame, "Переменная 2:", "var2", 5)
-        self.create_combobox_row(scrollable_frame, "Переменная 3:", "var3", 6)
+        self.create_combobox_row(scrollable_frame, "Формат даты:", "date_format", 4)  # НОВОЕ ПОЛЕ
+        self.create_combobox_row(scrollable_frame, "Переменная 1:", "var1", 5)
+        self.create_combobox_row(scrollable_frame, "Переменная 2:", "var2", 6)
+        self.create_combobox_row(scrollable_frame, "Переменная 3:", "var3", 7)
         
         # Настройки переименования
         rename_frame = ttk.LabelFrame(scrollable_frame, text="Настройки переименования")
@@ -658,7 +904,7 @@ class RenamerApp:
         ext_entry = ttk.Entry(ext_frame, textvariable=ext_var, width=30)
         ext_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
-        # Шаблон имени
+        # Шаблон имени - УЛУЧШЕННАЯ ВЕРСИЯ
         template_frame = ttk.Frame(rename_frame)
         template_frame.pack(fill=tk.X, pady=2)
         ttk.Label(template_frame, text="Шаблон имени:").pack(side=tk.LEFT)
@@ -667,19 +913,23 @@ class RenamerApp:
         self.widgets["template_var"] = template_var
         
         # Combobox для выбора шаблона из истории
-        template_cb = ttk.Combobox(
+        self.template_cb = ttk.Combobox(
             template_frame, 
             textvariable=template_var, 
             values=self.settings.settings.get("template_history", []),
             width=30
         )
-        template_cb.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        self.template_cb.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
         # Привязываем события для обновления истории
-        template_cb.bind('<<ComboboxSelected>>', lambda e: self.on_template_selected())
-        template_cb.bind('<FocusOut>', lambda e: self.on_template_selected())
+        self.template_cb.bind('<<ComboboxSelected>>', lambda e: self.on_template_selected())
+        self.template_cb.bind('<FocusOut>', lambda e: self.on_template_selected())
         
-        ttk.Button(template_frame, text="Проверить", command=self.check_template).pack(side=tk.LEFT)
+        # НОВАЯ КНОПКА - КОНСТРУКТОР ШАБЛОНА
+        ttk.Button(template_frame, text="Конструктор", 
+                  command=self.open_template_builder).pack(side=tk.LEFT, padx=2)
+        ttk.Button(template_frame, text="Проверить", 
+                  command=self.check_template).pack(side=tk.LEFT, padx=2)
         
         # Опция переименовывать только сегодняшние файлы
         today_only_frame = ttk.Frame(rename_frame)
@@ -694,6 +944,29 @@ class RenamerApp:
             variable=self.rename_only_today_var
         )
         rename_only_today_cb.pack(anchor=tk.W)
+    
+    def open_template_builder(self):
+        """Открытие конструктора шаблонов"""
+        current_template = self.widgets["template_var"].get()
+        
+        dialog = TemplateBuilderDialog(self.root, current_template, self.settings)
+        self.root.wait_window(dialog.dialog)
+        
+        if dialog.result_template:
+            # Обновляем поле шаблона
+            self.widgets["template_var"].set(dialog.result_template)
+            
+            # Сохраняем в настройки
+            self.settings.update_setting("template", dialog.result_template)
+            self.settings.add_to_template_history(dialog.result_template)
+            
+            # Обновляем список в комбобоксе
+            self.template_cb['values'] = self.settings.settings.get("template_history", [])
+            
+            logging.info(f"Шаблон обновлен через конструктор: {dialog.result_template}")
+            
+            # Показываем предпросмотр нового шаблона
+            self.check_template()
     
     def create_log_content(self, parent):
         """Создание содержимого логов"""
@@ -1454,6 +1727,7 @@ class RenamerApp:
             "tl_type": "{TL}",
             "route": "{route}",
             "number_format": "{counter}",
+            "date_format": "{date}",  # НОВАЯ ПОДСКАЗКА
             "var1": "{1}",
             "var2": "{2}",
             "var3": "{3}"
@@ -1796,10 +2070,22 @@ class RenamerApp:
         
         self.update_monitoring_button()
     
+    def format_date_by_format(self, date_obj, date_format):
+        """Форматирует дату по выбранному формату"""
+        format_mapping = {
+            "ДДММГГГГ": date_obj.strftime("%d%m%Y"),
+            "ДДММГГ": date_obj.strftime("%d%m%y"),
+            "ГГГГММДД": date_obj.strftime("%Y%m%d"),
+            "ДД.ММ.ГГГГ": date_obj.strftime("%d.%m.%Y"),
+            "ДД.ММ.ГГ": date_obj.strftime("%d.%m.%y"),
+            "ГГГГ.ММ.ДД": date_obj.strftime("%Y.%m.%d")
+        }
+        return format_mapping.get(date_format, date_obj.strftime("%Y%m%d"))
+    
     def generate_filename(self, filepath, counter=None):
         """Генерация имени файла по шаблону"""
         file_ext = Path(filepath).suffix.lower()[1:]  # Без точки
-        today = datetime.now().strftime("%Y%m%d")
+        today = datetime.now()
         
         # Если счетчик не передан, вычисляем его
         if counter is None:
@@ -1813,12 +2099,16 @@ class RenamerApp:
         else:
             counter_str = str(counter)
         
+        # Форматируем дату по выбранному формату
+        date_format = self.settings.settings.get("date_format", "ГГГГММДД")
+        formatted_date = self.format_date_by_format(today, date_format)
+        
         # Заменяем переменные в шаблоне
         filename = self.settings.settings["template"]
         filename = filename.replace("{project}", self.settings.settings["project"])
         filename = filename.replace("{TL}", self.settings.settings["tl_type"])
         filename = filename.replace("{route}", self.settings.settings["route"])
-        filename = filename.replace("{date}", today)
+        filename = filename.replace("{date}", formatted_date)
         filename = filename.replace("{counter}", counter_str)
         filename = filename.replace("{extension}", file_ext)
         filename = filename.replace("{1}", self.settings.settings["var1"])
@@ -1830,14 +2120,20 @@ class RenamerApp:
     def get_next_counter(self):
         """Получение следующего номера счетчика с учетом уже переименованных файлов и файлов в папке"""
         folder = self.settings.settings["folder"]
-        today = datetime.now().strftime("%Y%m%d")
+        today = datetime.now()
+        date_format = self.settings.settings.get("date_format", "ГГГГММДД")
+        formatted_date = self.format_date_by_format(today, date_format)
         
         if not os.path.exists(folder):
             return 1
         
-        # Ищем все файлы с сегодняшней датой и соответствующим профилем
+        # Создаем регулярное выражение для поиска файлов с текущей датой
+        # Экранируем специальные символы в отформатированной дате
+        escaped_date = re.escape(formatted_date)
+        
+        # Создаем шаблон для поиска файлов с текущей датой и форматом
         pattern = re.compile(
-            f"{re.escape(self.settings.settings['project'])}_{re.escape(today)}_"
+            f"{re.escape(self.settings.settings['project'])}_{escaped_date}_"
             f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['tl_type'])}"
         )
         
@@ -1858,10 +2154,15 @@ class RenamerApp:
     def get_max_counter_from_history(self):
         """Получение максимального номера из истории переименований"""
         max_counter = 0
-        today = datetime.now().strftime("%Y%m%d")
+        today = datetime.now()
+        date_format = self.settings.settings.get("date_format", "ГГГГММДД")
+        formatted_date = self.format_date_by_format(today, date_format)
+        
+        # Экранируем специальные символы в отформатированной дате
+        escaped_date = re.escape(formatted_date)
         
         pattern = re.compile(
-            f"{re.escape(self.settings.settings['project'])}_{re.escape(today)}_"
+            f"{re.escape(self.settings.settings['project'])}_{escaped_date}_"
             f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['tl_type'])}"
         )
         
@@ -1982,9 +2283,15 @@ class RenamerApp:
 
     def is_already_renamed(self, filename):
         """Проверяет, соответствует ли имя файла шаблону переименования"""
-        today = datetime.now().strftime("%Y%m%d")
+        today = datetime.now()
+        date_format = self.settings.settings.get("date_format", "ГГГГММДД")
+        formatted_date = self.format_date_by_format(today, date_format)
+        
+        # Экранируем специальные символы в отформатированной дате
+        escaped_date = re.escape(formatted_date)
+        
         pattern = re.compile(
-            f"{re.escape(self.settings.settings['project'])}_{re.escape(today)}_"
+            f"{re.escape(self.settings.settings['project'])}_{escaped_date}_"
             f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['tl_type'])}"
         )
         return pattern.match(filename) is not None
@@ -2067,6 +2374,17 @@ Delete - Очистить выделенные ячейки
 - Скрытие/отображение столбцов
 - Сброс к настройкам по умолчанию
 
+НОВЫЙ КОНСТРУКТОР ШАБЛОНОВ:
+- Визуальное построение шаблонов имен файлов
+- Предпросмотр результата в реальном времени
+- История ранее использованных шаблонов
+- Быстрая вставка переменных одним кликом
+
+НОВАЯ ФУНКЦИЯ - ФОРМАТ ДАТЫ:
+- Настройка формата даты в именах файлов
+- Доступные форматы: ДДММГГГГ, ДДММГГ, ГГГГММДД, ДД.ММ.ГГГГ, ДД.ММ.ГГ, ГГГГ.ММ.ДД
+- Автоматическое применение выбранного формата
+
 ОСНОВНЫЕ ФУНКЦИИ ПРОГРАММЫ:
 - Автоматическое переименование НОВЫХ файлов
 - Мониторинг папки в реальном времени
@@ -2106,6 +2424,19 @@ Email: drea_m_aster@vk.com
 • Скрытие/отображение столбцов
 • Настройка видимости через диалог
 • Сброс настроек к значениям по умолчанию
+
+🎨 НОВЫЙ КОНСТРУКТОР ШАБЛОНОВ:
+• Визуальное построение шаблонов без запоминания синтаксиса
+• Предпросмотр имен файлов в реальном времени
+• Группировка переменных по категориям
+• История ранее использованных шаблонов
+• Быстрая вставка статических элементов
+
+📅 НОВАЯ ФУНКЦИЯ - ФОРМАТ ДАТЫ:
+• Гибкая настройка формата даты в именах файлов
+• 6 предустановленных форматов на выбор
+• Поддержка форматов с разделителями и без
+• Автоматическое применение ко всем новым файлам
 
 Техническая поддержка:
 - Telegram: @xDream_Master
