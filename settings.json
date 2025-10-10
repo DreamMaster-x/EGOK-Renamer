@@ -1,14 +1,15 @@
 {
   "project": "Проект1",
-  "tl_type": "VK",
+  "cn_type": "VK",
   "route": "M2.1",
   "number_format": "01",
+  "date_format": "ГГГГММДД",
   "var1": "Значение1",
   "var2": "Значение2",
   "var3": "Значение3",
   "folder": "C:\\video\\violations",
   "extensions": "png,jpg,jpeg",
-  "template": "{project}_{date}_{route}_{counter}_{TL}",
+  "template": "{project}_{date}_{route}_{counter}_{CN}",
   "monitoring_enabled": true,
   "rename_only_today": true,
   "folder_history": [
@@ -17,43 +18,28 @@
     "D:\\projects\\images"
   ],
   "template_history": [
-    "{project}_{date}_{route}_{counter}_{TL}",
-    "{project}_{TL}_{date}_{counter}",
+    "{project}_{date}_{route}_{counter}_{CN}",
+    "{project}_{CN}_{date}_{counter}",
     "{route}_{date}_{counter}_{project}"
   ],
-  "enabled_plugins": [
-    "example_plugin", "photo_merge_plugin", "file_generator_plugin"]
-  ],
+  "enabled_plugins": ["example_plugin"],
   "combobox_values": {
-    "project": [
-      "Проект1",
-      "Проект2"
-    ],
-    "tl_type": [
-      "VK",
-      "Другой"
-    ],
-    "route": [
-      "M2.1",
-      "M2.2",
-      "M2.3"
-    ],
-    "number_format": [
-      "1",
-      "01",
-      "001"
-    ],
-    "var1": [
-      "Значение1",
-      "Значение2"
-    ],
-    "var2": [
-      "Значение1",
-      "Значение2"
-    ],
-    "var3": [
-      "Значение1",
-      "Значение2"
-    ]
+    "project": ["Проект1", "Проект2"],
+    "cn_type": ["VK", "Другой"],
+    "route": ["M2.1", "M2.2", "M2.3"],
+    "number_format": ["1", "01", "001"],
+    "date_format": ["ДДММГГГГ", "ДДММГГ", "ГГГГММДД", "ДД.ММ.ГГГГ", "ДД.ММ.ГГ", "ГГГГ.ММ.ДД"],
+    "var1": ["Значение1", "Значение2"],
+    "var2": ["Значение1", "Значение2"],
+    "var3": ["Значение1", "Значение2"]
+  },
+  "report_route_history": [],
+  "column_order": ["number", "create_time", "route", "original_name", "new_name"],
+  "column_visibility": {
+    "number": true,
+    "create_time": true,
+    "route": true,
+    "original_name": true,
+    "new_name": true
   }
 }

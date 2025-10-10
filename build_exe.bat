@@ -95,6 +95,7 @@ pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
 --hidden-import=tksheet._tksheet_row_index ^
 --hidden-import=tksheet._tksheet_header ^
 --hidden-import=tksheet._tksheet_column_drag_and_drop ^
+--hidden-import=sqlite3 ^
 --collect-all=plugins ^
 --collect-all=tksheet ^
 --collect-all=PIL ^

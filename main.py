@@ -4,7 +4,7 @@ import json
 import logging
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from datetime import datetime
+from datetime import datetime, date
 import threading
 import queue
 from pathlib import Path
@@ -17,9 +17,10 @@ import time
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from PIL import Image, ImageTk
+import sqlite3
 
 # Версия программы
-VERSION = "3.9.4"
+VERSION = "3.9.5"
 
 # Проверяем наличие tksheet
 try:
@@ -28,6 +29,154 @@ try:
 except ImportError:
     TKSHEET_AVAILABLE = False
     logging.error("Библиотека tksheet не установлена. Отчет будет ограничен в функциях.")
+
+class DatabaseManager:
+    """Менеджер базы данных для хранения истории переименований"""
+    
+    def __init__(self, db_file="rename_history.db"):
+        self.db_file = db_file
+        self.init_database()
+    
+    def init_database(self):
+        """Инициализация базы данных"""
+        try:
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            # Создаем таблицу для истории переименований
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS rename_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    create_date TEXT NOT NULL,
+                    route TEXT NOT NULL,
+                    original_name TEXT NOT NULL,
+                    new_name TEXT NOT NULL,
+                    file_path TEXT NOT NULL
+                )
+            ''')
+            
+            # Создаем индекс для быстрого поиска по дате
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_date 
+                ON rename_history(create_date)
+            ''')
+            
+            # Создаем индекс для быстрого поиска по маршруту
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_route 
+                ON rename_history(route)
+            ''')
+            
+            conn.commit()
+            conn.close()
+            logging.info("База данных инициализирована успешно")
+            
+        except Exception as e:
+            logging.error(f"Ошибка инициализации базы данных: {e}")
+    
+    def add_record(self, timestamp, route, original_name, new_name, file_path):
+        """Добавление записи в базу данных"""
+        try:
+            create_date = datetime.now().strftime("%Y-%m-%d")
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO rename_history 
+                (timestamp, create_date, route, original_name, new_name, file_path)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (timestamp, create_date, route, original_name, new_name, file_path))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            logging.error(f"Ошибка добавления записи в базу данных: {e}")
+            return False
+    
+    def get_records_by_date(self, target_date=None):
+        """Получение записей за определенную дату"""
+        try:
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            if target_date:
+                cursor.execute('''
+                    SELECT * FROM rename_history 
+                    WHERE create_date = ? 
+                    ORDER BY timestamp DESC
+                ''', (target_date,))
+            else:
+                cursor.execute('''
+                    SELECT * FROM rename_history 
+                    ORDER BY timestamp DESC
+                ''')
+            
+            records = cursor.fetchall()
+            conn.close()
+            
+            # Преобразуем в список словарей
+            columns = ['id', 'timestamp', 'create_date', 'route', 'original_name', 'new_name', 'file_path']
+            result = []
+            for record in records:
+                result.append(dict(zip(columns, record)))
+            
+            return result
+        except Exception as e:
+            logging.error(f"Ошибка получения записей из базы данных: {e}")
+            return []
+    
+    def get_all_dates(self):
+        """Получение всех уникальных дат из базы данных"""
+        try:
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT DISTINCT create_date FROM rename_history 
+                ORDER BY create_date DESC
+            ''')
+            
+            dates = [row[0] for row in cursor.fetchall()]
+            conn.close()
+            return dates
+        except Exception as e:
+            logging.error(f"Ошибка получения дат из базы данных: {e}")
+            return []
+    
+    def clear_records_by_date(self, target_date):
+        """Удаление записей за определенную дату"""
+        try:
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                DELETE FROM rename_history 
+                WHERE create_date = ?
+            ''', (target_date,))
+            
+            conn.commit()
+            conn.close()
+            return cursor.rowcount
+        except Exception as e:
+            logging.error(f"Ошибка удаления записей из базы данных: {e}")
+            return 0
+    
+    def clear_all_records(self):
+        """Удаление всех записей"""
+        try:
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            cursor.execute('DELETE FROM rename_history')
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            logging.error(f"Ошибка очистки базы данных: {e}")
+            return False
 
 class TemplateBuilderDialog:
     """Диалоговое окно для визуального построения шаблона"""
@@ -74,7 +223,7 @@ class TemplateBuilderDialog:
         # Группы переменных
         self.create_variable_group(variables_frame, "Основные переменные:", [
             ("{project}", "Проект", self.settings.settings["project"]),
-            ("{CN}", "Тип ЦН", self.settings.settings["cn_type"]),  # ИЗМЕНЕНО: {TL} на {CN}
+            ("{CN}", "Тип ЦН", self.settings.settings["cn_type"]),
             ("{route}", "Маршрут", self.settings.settings["route"]),
             ("{date}", "Дата", self.format_date_example()),
             ("{counter}", "Счетчик", "001"),
@@ -131,7 +280,7 @@ class TemplateBuilderDialog:
         preview_frame = ttk.LabelFrame(right_frame, text="Предпросмотр имени файла", padding="10")
         preview_frame.pack(fill=tk.BOTH, expand=True)
         
-        self.preview_var = tk.StringVar(value="Пример: project_20231201_route_001_CN.jpg")  # ИЗМЕНЕНО: VK на CN
+        self.preview_var = tk.StringVar(value="Пример: project_20231201_route_001_CN.jpg")
         preview_label = ttk.Label(preview_frame, textvariable=self.preview_var, 
                                  wraplength=400, justify=tk.LEFT)
         preview_label.pack(fill=tk.BOTH, expand=True)
@@ -211,7 +360,7 @@ class TemplateBuilderDialog:
     
     def reset_to_default(self):
         """Сброс к стандартному шаблону"""
-        default_template = "{project}_{date}_{route}_{counter}_{CN}"  # ИЗМЕНЕНО: {TL} на {CN}
+        default_template = "{project}_{date}_{route}_{counter}_{CN}"
         self.template_text.delete("1.0", tk.END)
         self.template_text.insert("1.0", default_template)
         self.update_preview()
@@ -236,7 +385,7 @@ class TemplateBuilderDialog:
             # Заменяем переменные на примеры значений
             preview = template
             preview = preview.replace("{project}", self.settings.settings["project"])
-            preview = preview.replace("{CN}", self.settings.settings["cn_type"])  # ИЗМЕНЕНО: {TL} на {CN}
+            preview = preview.replace("{CN}", self.settings.settings["cn_type"])
             preview = preview.replace("{route}", self.settings.settings["route"])
             
             # Форматируем дату по выбранному формату
@@ -336,7 +485,7 @@ class Settings:
             "var3": "Значение3",
             "folder": r"C:\video\violations",
             "extensions": "png,jpg,jpeg",
-            "template": "{project}_{date}_{route}_{counter}_{CN}",  # ИЗМЕНЕНО: {TL} на {CN}
+            "template": "{project}_{date}_{route}_{counter}_{CN}",
             "monitoring_enabled": True,
             "rename_only_today": True,
             "folder_history": [
@@ -345,8 +494,8 @@ class Settings:
                 r"D:\projects\images"
             ],
             "template_history": [
-                "{project}_{date}_{route}_{counter}_{CN}",  # ИЗМЕНЕНО: {TL} на {CN}
-                "{project}_{CN}_{date}_{counter}",  # ИЗМЕНЕНО: {TL} на {CN}
+                "{project}_{date}_{route}_{counter}_{CN}",
+                "{project}_{CN}_{date}_{counter}",
                 "{route}_{date}_{counter}_{project}"
             ],
             "enabled_plugins": ["example_plugin"],
@@ -359,6 +508,15 @@ class Settings:
                 "var1": ["Значение1", "Значение2"],
                 "var2": ["Значение1", "Значение2"],
                 "var3": ["Значение1", "Значение2"]
+            },
+            "report_route_history": [],
+            "column_order": ["number", "create_time", "route", "original_name", "new_name"],
+            "column_visibility": {
+                "number": True,
+                "create_time": True,
+                "route": True,
+                "original_name": True,
+                "new_name": True
             }
         }
         self.load_settings()
@@ -383,6 +541,16 @@ class Settings:
                     # Обновляем основной шаблон для обратной совместимости
                     if "template" in loaded_settings and "{TL}" in loaded_settings["template"]:
                         loaded_settings["template"] = loaded_settings["template"].replace("{TL}", "{CN}")
+                    
+                    # Добавляем новые поля если их нет
+                    if "report_route_history" not in loaded_settings:
+                        loaded_settings["report_route_history"] = []
+                    
+                    if "column_order" not in loaded_settings:
+                        loaded_settings["column_order"] = self.default_settings["column_order"]
+                    
+                    if "column_visibility" not in loaded_settings:
+                        loaded_settings["column_visibility"] = self.default_settings["column_visibility"]
                     
                     self.settings = {**self.default_settings, **loaded_settings}
             else:
@@ -420,6 +588,19 @@ class Settings:
             # Ограничиваем историю 10 элементами
             self.settings["template_history"] = self.settings["template_history"][:10]
             self.save_settings()
+    
+    def add_to_route_history(self, route):
+        """Добавление маршрута в историю для отчета"""
+        if route and route not in self.settings["report_route_history"]:
+            self.settings["report_route_history"].append(route)
+            self.save_settings()
+    
+    def add_to_combobox_values(self, key, value):
+        """Добавление значения в список значений комбобокса"""
+        if key in self.settings["combobox_values"]:
+            if value and value not in self.settings["combobox_values"][key]:
+                self.settings["combobox_values"][key].append(value)
+                self.save_settings()
 
 class BasePlugin:
     """Базовый класс для всех плагинов"""
@@ -595,12 +776,14 @@ class RenamerApp:
         
         self.settings = Settings()
         self.renamed_files_manager = RenamedFilesManager()
+        self.db_manager = DatabaseManager()
         self.monitor = None
         self.log_queue = queue.Queue()
         self.widgets = {}
         self.log_line_counter = 0
         self.rename_history = []
         self.current_route_filter = "Все"
+        self.current_date_filter = None
         
         # Данные для отчета
         self.report_data = []
@@ -611,16 +794,10 @@ class RenamerApp:
         self.column_ids = ["number", "create_time", "route", "original_name", "new_name"]
         
         # Словарь для управления видимостью колонок
-        self.column_visibility = {
-            "number": True,
-            "create_time": True,
-            "route": True,
-            "original_name": True,
-            "new_name": True
-        }
+        self.column_visibility = self.settings.settings["column_visibility"]
         
         # Порядок колонок
-        self.column_order = ["number", "create_time", "route", "original_name", "new_name"]
+        self.column_order = self.settings.settings["column_order"]
         
         # Блокировка для безопасного доступа к общим ресурсам
         self.rename_lock = threading.Lock()
@@ -632,6 +809,9 @@ class RenamerApp:
         self.create_widgets()
         self.load_settings_to_ui()
         self.process_log_queue()
+        
+        # Загрузка истории переименований из базы данных
+        self.load_report_history()
         
         # Запуск мониторинга если включен
         if self.settings.settings.get("monitoring_enabled", True):
@@ -872,7 +1052,7 @@ class RenamerApp:
         self.update_monitoring_button()
         
         self.create_combobox_row(scrollable_frame, "Проект:", "project", 0)
-        self.create_combobox_row(scrollable_frame, "Тип ЦН:", "cn_type", 1)  # ИЗМЕНЕНО: tl_type на cn_type
+        self.create_combobox_row(scrollable_frame, "Тип ЦН:", "cn_type", 1)
         self.create_combobox_row(scrollable_frame, "Маршрут:", "route", 2)
         self.create_combobox_row(scrollable_frame, "Формат номера:", "number_format", 3)
         self.create_combobox_row(scrollable_frame, "Формат даты:", "date_format", 4)
@@ -1017,22 +1197,55 @@ class RenamerApp:
         # Кнопка управления колонками
         ttk.Button(report_controls_frame, text="Управление колонками", command=self.show_column_management_dialog).pack(side=tk.LEFT, padx=2)
         
-        # Фильтр по маршруту
+        # Фильтр по маршруту и дате
         filter_frame = ttk.Frame(report_controls_frame)
         filter_frame.pack(side=tk.RIGHT, padx=5)
         
-        ttk.Label(filter_frame, text="Фильтр по маршруту:").pack(side=tk.LEFT, padx=2)
+        # Фильтр по маршруту
+        route_filter_frame = ttk.Frame(filter_frame)
+        route_filter_frame.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(route_filter_frame, text="Маршрут:").pack(side=tk.LEFT, padx=2)
         
         self.route_filter_var = tk.StringVar(value="Все")
+        
+        # Получаем значения для фильтра из истории маршрутов отчета
+        route_values = ["Все"] + self.settings.settings.get("report_route_history", [])
+        
         self.route_filter_cb = ttk.Combobox(
-            filter_frame, 
+            route_filter_frame, 
             textvariable=self.route_filter_var,
-            values=["Все"] + self.settings.settings["combobox_values"]["route"],
+            values=route_values,
             state="readonly",
             width=10
         )
         self.route_filter_cb.pack(side=tk.LEFT, padx=2)
         self.route_filter_cb.bind('<<ComboboxSelected>>', self.on_route_filter_changed)
+        
+        # Фильтр по дате
+        date_filter_frame = ttk.Frame(filter_frame)
+        date_filter_frame.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(date_filter_frame, text="Дата:").pack(side=tk.LEFT, padx=2)
+        
+        # Получаем все доступные даты из базы данных
+        available_dates = self.db_manager.get_all_dates()
+        date_values = ["Все даты"] + available_dates
+        
+        self.date_filter_var = tk.StringVar(value="Все даты")
+        
+        self.date_filter_cb = ttk.Combobox(
+            date_filter_frame, 
+            textvariable=self.date_filter_var,
+            values=date_values,
+            state="readonly",
+            width=12
+        )
+        self.date_filter_cb.pack(side=tk.LEFT, padx=2)
+        self.date_filter_cb.bind('<<ComboboxSelected>>', self.on_date_filter_changed)
+        
+        # Кнопка обновления списка дат
+        ttk.Button(date_filter_frame, text="Обновить", command=self.update_date_filter).pack(side=tk.LEFT, padx=2)
         
         # Фрейм для таблицы отчета
         table_frame = ttk.Frame(report_frame)
@@ -1049,90 +1262,98 @@ class RenamerApp:
     
     def create_sheet_table(self, parent):
         """Создание продвинутой таблицы с улучшенным выделением как в Excel"""
-        # Создаем таблицу с включенными индексами строк
-        self.report_sheet = tksheet.Sheet(
-            parent,
-            show_row_index=True,  # Включаем отображение индексов строк
-            show_header=True,
-            show_x_scrollbar=True,
-            show_y_scrollbar=True,
-            headers=["№", "Время создания", "Маршрут", "Исходное имя файла", "Новое имя файла"],
-            header_height=30,
-            row_index_width=50,
-            frame_bg="white"
-        )
-        
-        # Включаем все необходимые привязки для Excel-подобного поведения
-        self.report_sheet.enable_bindings(
-            # Основное выделение
-            "single_select",
-            "toggle_select",
-            "drag_select",
-            "row_select",
-            "column_select",
-            "cell_select",
-            "all",
+        try:
+            # Создаем таблицу с включенными индексами строк
+            self.report_sheet = tksheet.Sheet(
+                parent,
+                show_row_index=True,  # Включаем отображение индексов строк
+                show_header=True,
+                show_x_scrollbar=True,
+                show_y_scrollbar=True,
+                headers=self.column_headers,
+                header_height=30,
+                row_index_width=50,
+                frame_bg="white"
+            )
             
-            # Навигация
-            "arrowkeys",
-            "tab",
-            "ctrl_a",
-            "ctrl_c",
-            "ctrl_v",
-            "ctrl_x",
+            # Включаем все необходимые привязки для Excel-подобного поведения
+            self.report_sheet.enable_bindings(
+                # Основное выделение
+                "single_select",
+                "toggle_select",
+                "drag_select",
+                "row_select",
+                "column_select",
+                "cell_select",
+                "all",
+                
+                # Навигация
+                "arrowkeys",
+                "tab",
+                "ctrl_a",
+                "ctrl_c",
+                "ctrl_v",
+                "ctrl_x",
+                
+                # Работа с буфером обмена
+                "copy",
+                "cut",
+                "paste",
+                "delete",
+                
+                # Редактирование
+                "edit_cell",
+                
+                # Контекстное меню
+                "right_click_popup_menu",
+                "rc_select",
+                "rc_insert_column",
+                "rc_delete_column",
+                "rc_insert_row",
+                "rc_delete_row",
+                
+                # Дополнительные функции
+                "undo",
+                "redo",
+                "edit_header",
+                
+                # Перетаскивание колонок
+                "drag_and_drop_column"
+            )
             
-            # Работа с буфером обмена
-            "copy",
-            "cut",
-            "paste",
-            "delete",
+            # Настраиваем таблицу для лучшего отображения
+            self.report_sheet.set_sheet_data(self.report_data)
             
-            # Редактирование
-            "edit_cell",
+            # Настраиваем ширину колонок
+            self.report_sheet.column_width(column=0, width=50)   # №
+            self.report_sheet.column_width(column=1, width=120)  # Время создания
+            self.report_sheet.column_width(column=2, width=100)  # Маршрут
+            self.report_sheet.column_width(column=3, width=250)  # Исходное имя файла
+            self.report_sheet.column_width(column=4, width=250)  # Новое имя файла
             
-            # Контекстное меню
-            "right_click_popup_menu",
-            "rc_select",
-            "rc_insert_column",
-            "rc_delete_column",
-            "rc_insert_row",
-            "rc_delete_row",
+            # Настраиваем выравнивание
+            if self.report_data:
+                self.report_sheet.set_cell_alignments(align="center", cells=[(r, 0) for r in range(len(self.report_data))])  # № по центру
+                self.report_sheet.set_cell_alignments(align="center", cells=[(r, 1) for r in range(len(self.report_data))])  # Время по центру
+                self.report_sheet.set_cell_alignments(align="center", cells=[(r, 2) for r in range(len(self.report_data))])  # Маршрут по центру
             
-            # Дополнительные функции
-            "undo",
-            "redo",
-            "edit_header"
-        )
-        
-        # Настраиваем таблицу для лучшего отображения
-        self.report_sheet.set_sheet_data(self.report_data)
-        
-        # Настраиваем ширину колонок
-        self.report_sheet.column_width(column=0, width=50)   # №
-        self.report_sheet.column_width(column=1, width=120)  # Время создания
-        self.report_sheet.column_width(column=2, width=100)  # Маршрут
-        self.report_sheet.column_width(column=3, width=250)  # Исходное имя файла
-        self.report_sheet.column_width(column=4, width=250)  # Новое имя файла
-        
-        # Настраиваем выравнивание
-        if self.report_data:
-            self.report_sheet.set_cell_alignments(align="center", cells=[(r, 0) for r in range(len(self.report_data))])  # № по центру
-            self.report_sheet.set_cell_alignments(align="center", cells=[(r, 1) for r in range(len(self.report_data))])  # Время по центру
-            self.report_sheet.set_cell_alignments(align="center", cells=[(r, 2) for r in range(len(self.report_data))])  # Маршрут по центру
-        
-        # Упаковка таблицы
-        self.report_sheet.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Создаем улучшенное контекстное меню
-        self.create_enhanced_context_menu()
-        
-        # Привязываем улучшенное контекстное меню
-        self.report_sheet.bind("<Button-3>", self.show_enhanced_context_menu)
-        
-        # Привязываем двойной клик для редактирования
-        self.report_sheet.bind("<Double-Button-1>", self.on_double_click)
-        
-        logging.info("Таблица отчета инициализирована с улучшенным выделением")
+            # Упаковка таблицы
+            self.report_sheet.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            # Создаем улучшенное контекстное меню
+            self.create_enhanced_context_menu()
+            
+            # Привязываем улучшенное контекстное меню
+            self.report_sheet.bind("<Button-3>", self.show_enhanced_context_menu)
+            
+            # Привязываем двойной клик для редактирования
+            self.report_sheet.bind("<Double-Button-1>", self.on_double_click)
+            
+            logging.info("Таблица отчета инициализирована с улучшенным выделением")
+            
+        except Exception as e:
+            logging.error(f"Ошибка создания таблицы tksheet: {e}")
+            self.create_fallback_table(parent)
     
     def create_enhanced_context_menu(self):
         """Создание улучшенного контекстного меню для таблицы"""
@@ -1549,9 +1770,15 @@ class RenamerApp:
                     self.report_tree.delete(item)
             
             self.rename_history.clear()
-            # Сбрасываем фильтр
+            # Сбрасываем фильтры
             self.route_filter_var.set("Все")
+            self.date_filter_var.set("Все даты")
             self.current_route_filter = "Все"
+            self.current_date_filter = None
+            
+            # Очищаем базу данных
+            self.db_manager.clear_all_records()
+            
             logging.info("Отчет о переименованных файлах очищен")
     
     def export_report(self):
@@ -1583,6 +1810,7 @@ class RenamerApp:
                     f.write("=" * 80 + "\n")
                     f.write(f"Создан: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                     f.write(f"Фильтр по маршруту: {self.current_route_filter}\n")
+                    f.write(f"Фильтр по дате: {self.current_date_filter or 'Все даты'}\n")
                     f.write("=" * 80 + "\n")
                     f.write("№\tВремя\tМаршрут\tИсходное имя\tНовое имя\n")
                     f.write("-" * 80 + "\n")
@@ -1618,6 +1846,12 @@ class RenamerApp:
         # Получаем текущий маршрут из настроек
         route = self.settings.settings["route"]
         
+        # Добавляем маршрут в историю для фильтра
+        if route not in self.settings.settings.get("report_route_history", []):
+            self.settings.add_to_route_history(route)
+            # Обновляем комбобокс фильтра
+            self.update_route_filter_combobox()
+        
         # Номер строки
         number = len(self.rename_history) + 1
         
@@ -1636,6 +1870,10 @@ class RenamerApp:
         # Добавляем в данные отчета
         self.report_data.append(row_data)
         
+        # Сохраняем в базу данных
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.db_manager.add_record(timestamp, route, original_name, new_name, filepath)
+        
         # Добавляем в таблицу
         if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
             self.report_sheet.set_sheet_data(self.report_data)
@@ -1643,37 +1881,94 @@ class RenamerApp:
             values = (number, create_time, route, original_name, new_name)
             item_id = self.report_tree.insert("", tk.END, values=values)
             
-            # Применяем текущий фильтр
-            if self.current_route_filter != "Все" and route != self.current_route_filter:
-                self.report_tree.detach(item_id)
-            
             # Автоматически прокручиваем к последней записи
             self.report_tree.see(item_id)
         
         # Логируем добавление в отчет
         logging.info(f"Добавлено в отчет: {original_name} -> {new_name}")
     
+    def is_record_from_today(self, timestamp):
+        """Проверяет, относится ли запись к сегодняшней дате"""
+        try:
+            record_date = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S").date()
+            today = datetime.now().date()
+            return record_date == today
+        except:
+            return False
+    
+    def load_report_history(self):
+        """Загрузка истории переименований из базы данных"""
+        try:
+            records = self.db_manager.get_records_by_date()
+            
+            # Преобразуем записи в формат для отчета
+            self.report_data = []
+            for i, record in enumerate(records):
+                row_data = [
+                    i + 1,
+                    record['timestamp'].split(' ')[1] if ' ' in record['timestamp'] else record['timestamp'],
+                    record['route'],
+                    record['original_name'],
+                    record['new_name']
+                ]
+                self.report_data.append(row_data)
+            
+            # Обновляем таблицу
+            if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
+                self.report_sheet.set_sheet_data(self.report_data)
+            elif hasattr(self, 'report_tree'):
+                for item in self.report_tree.get_children():
+                    self.report_tree.delete(item)
+                
+                for row in self.report_data:
+                    self.report_tree.insert("", tk.END, values=tuple(row))
+            
+            # Обновляем список дат в фильтре
+            self.update_date_filter()
+            
+            logging.info(f"Загружено {len(records)} записей из истории")
+        except Exception as e:
+            logging.error(f"Ошибка загрузки истории отчета: {e}")
+    
+    def update_route_filter_combobox(self):
+        """Обновление комбобокса фильтра по маршруту"""
+        # Обновляем значения комбобокса фильтра
+        route_values = ["Все"] + self.settings.settings.get("report_route_history", [])
+        self.route_filter_cb['values'] = route_values
+    
+    def update_date_filter(self):
+        """Обновление комбобокса фильтра по дате"""
+        # Получаем все доступные даты из базы данных
+        available_dates = self.db_manager.get_all_dates()
+        date_values = ["Все даты"] + available_dates
+        self.date_filter_cb['values'] = date_values
+    
     def apply_column_visibility(self):
         """Применить настройки видимости колонок"""
         if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
-            # Для tksheet скрываем/показываем колонки
+            # Для tksheet используем свойство visible_columns
             columns_to_show = []
-            columns_to_hide = []
             
-            for i, column in enumerate(self.column_order):
-                if self.column_visibility[column]:
-                    columns_to_show.append(i)
-                else:
-                    columns_to_hide.append(i)
+            # Создаем mapping: column_id -> индекс
+            column_id_to_index = {column_id: i for i, column_id in enumerate(self.column_ids)}
             
-            # ИСПРАВЛЕНИЕ: используем правильные названия методов
-            if columns_to_show:
-                self.report_sheet.show_columns(columns_to_show)
-            if columns_to_hide:
-                self.report_sheet.hide_columns(columns_to_hide)
+            # Формируем список индексов видимых колонок в правильном порядке
+            for column_id in self.column_order:
+                if self.column_visibility.get(column_id, True):
+                    if column_id in column_id_to_index:
+                        columns_to_show.append(column_id_to_index[column_id])
+            
+            # Устанавливаем видимые колонки через свойство visible_columns
+            try:
+                self.report_sheet.visible_columns = columns_to_show
+            except AttributeError:
+                # Для старых версий tksheet
+                logging.warning("Свойство visible_columns недоступно, используется display_columns")
+                self.report_sheet.display_columns(columns_to_show)
+                
         elif hasattr(self, 'report_tree'):
             # Для Treeview определяем видимые колонки в правильном порядке
-            visible_columns = [col for col in self.column_order if self.column_visibility[col]]
+            visible_columns = [col for col in self.column_order if self.column_visibility.get(col, True)]
             
             # Устанавливаем отображаемые колонки
             self.report_tree["displaycolumns"] = visible_columns
@@ -1688,36 +1983,55 @@ class RenamerApp:
             }
             
             for column in visible_columns:
-                self.report_tree.heading(column, text=column_names[column])
+                self.report_tree.heading(column, text=column_names.get(column, column))
     
     def on_route_filter_changed(self, event=None):
         """Обработка изменения фильтра по маршруту"""
         selected_route = self.route_filter_var.get()
         self.current_route_filter = selected_route
-        
+        self.apply_filters()
+    
+    def on_date_filter_changed(self, event=None):
+        """Обработка изменения фильтра по дате"""
+        selected_date = self.date_filter_var.get()
+        self.current_date_filter = selected_date if selected_date != "Все даты" else None
+        self.apply_filters()
+    
+    def apply_filters(self):
+        """Применение всех активных фильтров"""
         if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
             # Для tksheet фильтруем данные
-            if selected_route == "Все":
-                self.report_sheet.set_sheet_data(self.report_data)
-            else:
-                filtered_data = [row for row in self.report_data if row[2] == selected_route]
-                self.report_sheet.set_sheet_data(filtered_data)
+            filtered_data = []
+            
+            for row in self.report_data:
+                route_match = (self.current_route_filter == "Все" or 
+                              (len(row) > 2 and row[2] == self.current_route_filter))
+                
+                # Для фильтрации по дате нам нужно получить полные данные из БД
+                # Пока пропускаем фильтрацию по дате для tksheet для простоты
+                if route_match:
+                    filtered_data.append(row)
+            
+            self.report_sheet.set_sheet_data(filtered_data)
         elif hasattr(self, 'report_tree'):
-            # Для Treeview показываем/скрываем элементы в соответствии с фильтром
+            # Для Treeview показываем/скрываем элементы в соответствии с фильтрами
             all_items = self.report_tree.get_children()
             
             for item in all_items:
                 values = self.report_tree.item(item, "values")
                 if len(values) > 2:
                     route = values[2]  # values[2] - колонка с маршрутом
-                    if selected_route == "Все" or route == selected_route:
+                    route_match = (self.current_route_filter == "Все" or route == self.current_route_filter)
+                    
+                    # Пока пропускаем фильтрацию по дате для Treeview для простоты
+                    if route_match:
                         # Показываем элемент
                         self.report_tree.attach(item, '', 'end')
                     else:
                         # Скрываем элемент (но не удаляем)
                         self.report_tree.detach(item)
         
-        logging.info(f"Применен фильтр по маршруту: {selected_route}")
+        logging.info(f"Применены фильтры: маршрут={self.current_route_filter}, дата={self.current_date_filter or 'Все даты'}")
     
     def create_combobox_row(self, parent, label, key, row):
         """Создание строки с Combobox"""
@@ -1738,7 +2052,7 @@ class RenamerApp:
         # Подсказка
         hints = {
             "project": "{project}",
-            "cn_type": "{CN}",  # ИЗМЕНЕНО: {TL} на {CN}
+            "cn_type": "{CN}",
             "route": "{route}",
             "number_format": "{counter}",
             "date_format": "{date}",
@@ -1768,63 +2082,164 @@ class RenamerApp:
         """Диалог управления колонками"""
         dialog = tk.Toplevel(self.root)
         dialog.title("Управление колонками отчета")
-        dialog.geometry("300x250")
+        dialog.geometry("400x350")
         dialog.transient(self.root)
         dialog.grab_set()
         
         main_frame = ttk.Frame(dialog, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(main_frame, text="Видимые колонки:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 10))
+        ttk.Label(main_frame, text="Управление колонками отчета:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 10))
         
-        # Фрейм для списка колонок
-        columns_frame = ttk.Frame(main_frame)
+        # Фрейм для списка колонок с возможностью перетаскивания
+        columns_frame = ttk.LabelFrame(main_frame, text="Видимые колонки (перетащите для изменения порядка)")
         columns_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         
-        # Создаем чекбоксы для каждой колонки
-        column_vars = {}
-        for column in self.column_order:
-            var = tk.BooleanVar(value=self.column_visibility[column])
-            column_vars[column] = var
-            
-            # Определяем название колонки для отображения
-            column_names = {
-                "number": "№",
-                "create_time": "Время",
-                "route": "Маршрут",
-                "original_name": "Исходное имя",
-                "new_name": "Новое имя"
-            }
-            
-            cb = ttk.Checkbutton(columns_frame, text=column_names[column], variable=var)
-            cb.pack(anchor=tk.W, pady=2)
+        # Создаем список колонок с чекбоксами
+        self.column_vars = {}
+        self.column_listbox = tk.Listbox(columns_frame, selectmode=tk.SINGLE)
+        scrollbar = ttk.Scrollbar(columns_frame, orient=tk.VERTICAL, command=self.column_listbox.yview)
+        self.column_listbox.configure(yscrollcommand=scrollbar.set)
         
-        def save_columns():
-            # Сохраняем настройки видимости
-            for column, var in column_vars.items():
-                self.column_visibility[column] = var.get()
-            
-            # Применяем изменения
-            self.apply_column_visibility()
-            dialog.destroy()
-            logging.info("Настройки видимости колонок сохранены")
+        # Заполняем список колонок
+        column_names = {
+            "number": "№",
+            "create_time": "Время создания",
+            "route": "Маршрут",
+            "original_name": "Исходное имя файла",
+            "new_name": "Новое имя файла"
+        }
         
-        def reset_columns():
-            # Сбрасываем настройки к значениям по умолчанию
-            for column in self.column_visibility:
-                self.column_visibility[column] = True
-            self.column_order = ["number", "create_time", "route", "original_name", "new_name"]
-            self.apply_column_visibility()
-            dialog.destroy()
-            logging.info("Настройки видимости колонок сброшены к значениям по умолчанию")
+        for column_id in self.column_order:
+            if column_id in self.column_visibility:
+                display_name = column_names.get(column_id, column_id)
+                status = "✓" if self.column_visibility[column_id] else "✗"
+                self.column_listbox.insert(tk.END, f"{status} {display_name}")
+                self.column_vars[column_id] = self.column_visibility[column_id]
         
-        # Фрейм для кнопок
+        # Привязываем обработчик двойного клика для переключения видимости
+        self.column_listbox.bind("<Double-Button-1>", self.toggle_column_visibility)
+        
+        # Привязываем обработчик перетаскивания для изменения порядка
+        self.column_listbox.bind('<ButtonPress-1>', self.on_drag_start)
+        self.column_listbox.bind('<B1-Motion>', self.on_drag_motion)
+        self.column_listbox.bind('<ButtonRelease-1>', self.on_drag_release)
+        
+        self.column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Кнопки управления
         buttons_frame = ttk.Frame(main_frame)
         buttons_frame.pack(fill=tk.X, pady=10)
         
-        ttk.Button(buttons_frame, text="Сохранить", command=save_columns).pack(side=tk.LEFT, padx=5)
-        ttk.Button(buttons_frame, text="Сбросить", command=reset_columns).pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Сохранить", command=lambda: self.save_column_settings(dialog)).pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Сбросить", command=self.reset_column_settings).pack(side=tk.LEFT, padx=5)
         ttk.Button(buttons_frame, text="Отмена", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+    
+    def toggle_column_visibility(self, event):
+        """Переключение видимости колонки при двойном клике"""
+        selection = self.column_listbox.curselection()
+        if selection:
+            index = selection[0]
+            column_id = self.column_order[index]
+            self.column_vars[column_id] = not self.column_vars[column_id]
+            
+            # Обновляем отображение в списке
+            column_names = {
+                "number": "№",
+                "create_time": "Время создания",
+                "route": "Маршрут",
+                "original_name": "Исходное имя файла",
+                "new_name": "Новое имя файла"
+            }
+            
+            display_name = column_names.get(column_id, column_id)
+            status = "✓" if self.column_vars[column_id] else "✗"
+            self.column_listbox.delete(index)
+            self.column_listbox.insert(index, f"{status} {display_name}")
+            self.column_listbox.selection_set(index)
+    
+    def on_drag_start(self, event):
+        """Начало перетаскивания элемента списка"""
+        self.drag_start_index = self.column_listbox.nearest(event.y)
+    
+    def on_drag_motion(self, event):
+        """Перетаскивание элемента списка"""
+        pass  # Визуальная обработка не требуется
+    
+    def on_drag_release(self, event):
+        """Завершение перетаскивания элемента списка"""
+        end_index = self.column_listbox.nearest(event.y)
+        if hasattr(self, 'drag_start_index') and self.drag_start_index != end_index:
+            # Перемещаем элемент в списке
+            items = list(self.column_vars.items())
+            item_to_move = items.pop(self.drag_start_index)
+            items.insert(end_index, item_to_move)
+            
+            # Обновляем порядок колонок
+            self.column_order = [item[0] for item in items]
+            self.column_vars = dict(items)
+            
+            # Обновляем отображение списка
+            self.column_listbox.delete(0, tk.END)
+            
+            column_names = {
+                "number": "№",
+                "create_time": "Время создания",
+                "route": "Маршрут",
+                "original_name": "Исходное имя файла",
+                "new_name": "Новое имя файла"
+            }
+            
+            for column_id, is_visible in items:
+                display_name = column_names.get(column_id, column_id)
+                status = "✓" if is_visible else "✗"
+                self.column_listbox.insert(tk.END, f"{status} {display_name}")
+            
+            # Выделяем перемещенный элемент
+            self.column_listbox.selection_set(end_index)
+    
+    def save_column_settings(self, dialog):
+        """Сохранение настроек колонок"""
+        # Сохраняем настройки видимости
+        self.column_visibility = self.column_vars.copy()
+        self.settings.update_setting("column_visibility", self.column_visibility)
+        self.settings.update_setting("column_order", self.column_order)
+        
+        # Применяем изменения
+        self.apply_column_visibility()
+        dialog.destroy()
+        logging.info("Настройки колонок сохранены")
+    
+    def reset_column_settings(self):
+        """Сброс настроек колонок к значениям по умолчанию"""
+        # Сбрасываем настройки к значениям по умолчанию
+        self.column_visibility = {
+            "number": True,
+            "create_time": True,
+            "route": True,
+            "original_name": True,
+            "new_name": True
+        }
+        self.column_order = ["number", "create_time", "route", "original_name", "new_name"]
+        
+        # Обновляем диалог
+        self.column_listbox.delete(0, tk.END)
+        
+        column_names = {
+            "number": "№",
+            "create_time": "Время создания",
+            "route": "Маршрут",
+            "original_name": "Исходное имя файла",
+            "new_name": "Новое имя файла"
+        }
+        
+        for column_id in self.column_order:
+            display_name = column_names.get(column_id, column_id)
+            status = "✓" if self.column_visibility[column_id] else "✗"
+            self.column_listbox.insert(tk.END, f"{status} {display_name}")
+        
+        logging.info("Настройки колонок сброшены к значениям по умолчанию")
     
     def install_plugin_dialog(self):
         """Диалог установки нового плагина"""
@@ -1996,10 +2411,12 @@ class RenamerApp:
             value = self.widgets[f"{key}_var"].get()
             self.settings.update_setting(key, value)
             
-            # Добавляем новое значение в список значений если его там нет
-            if value not in self.settings.settings["combobox_values"][key]:
-                self.settings.settings["combobox_values"][key].append(value)
-                self.settings.save_settings()
+            # ДОБАВЛЕНО: добавляем новое значение в список значений комбобокса если его там нет
+            self.settings.add_to_combobox_values(key, value)
+            
+            # ДОБАВЛЕНО: если это маршрут, обновляем фильтр в отчете
+            if key == "route":
+                self.update_route_filter_combobox()
             
             logging.info(f"Настройка '{key}' изменена на: {value}")
     
@@ -2120,7 +2537,7 @@ class RenamerApp:
         # Заменяем переменные в шаблоне
         filename = self.settings.settings["template"]
         filename = filename.replace("{project}", self.settings.settings["project"])
-        filename = filename.replace("{CN}", self.settings.settings["cn_type"])  # ИЗМЕНЕНО: {TL} на {CN}
+        filename = filename.replace("{CN}", self.settings.settings["cn_type"])
         filename = filename.replace("{route}", self.settings.settings["route"])
         filename = filename.replace("{date}", formatted_date)
         filename = filename.replace("{counter}", counter_str)
@@ -2148,7 +2565,7 @@ class RenamerApp:
         # Создаем шаблон для поиска файлов с текущей датой и форматом
         pattern = re.compile(
             f"{re.escape(self.settings.settings['project'])}_{escaped_date}_"
-            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['cn_type'])}"  # ИЗМЕНЕНО: tl_type на cn_type
+            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['cn_type'])}"
         )
         
         max_counter = 0
@@ -2177,7 +2594,7 @@ class RenamerApp:
         
         pattern = re.compile(
             f"{re.escape(self.settings.settings['project'])}_{escaped_date}_"
-            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['cn_type'])}"  # ИЗМЕНЕНО: tl_type на cn_type
+            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['cn_type'])}"
         )
         
         # Проверяем файлы в папке, которые уже соответствуют шаблону
@@ -2306,7 +2723,7 @@ class RenamerApp:
         
         pattern = re.compile(
             f"{re.escape(self.settings.settings['project'])}_{escaped_date}_"
-            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['cn_type'])}"  # ИЗМЕНЕНО: tl_type на cn_type
+            f"{re.escape(self.settings.settings['route'])}_(\\d+)_{re.escape(self.settings.settings['cn_type'])}"
         )
         return pattern.match(filename) is not None
 
@@ -2384,7 +2801,7 @@ Delete - Очистить выделенные ячейки
 
 УПРАВЛЕНИЕ СТОЛБЦАМИ:
 - Настройка видимости столбцов
-- Изменение порядка столбцов
+- Изменение порядка столбцов (перетаскивание)
 - Скрытие/отображение столбцов
 - Сброс к настройкам по умолчанию
 
@@ -2402,6 +2819,13 @@ Delete - Очистить выделенные ячейки
 ОБНОВЛЕННЫЕ ПЕРЕМЕННЫЕ ШАБЛОНА:
 - {CN} - Тип ЦН (ранее {{TL}})
 
+НОВЫЕ ФУНКЦИИ ОТЧЕТА:
+✓ Сохранение истории переименований в базе данных
+✓ Фильтрация по дате и маршруту
+✓ Просмотр отчетов за прошлые дни
+✓ Сохранение данных между запусками программы
+✓ Автоматическое обновление списка доступных дат
+
 ОСНОВНЫЕ ФУНКЦИИ ПРОГРАММЫ:
 - Автоматическое переименование НОВЫХ файлов
 - Мониторинг папки в реальном времени
@@ -2411,7 +2835,7 @@ Delete - Очистить выделенные ячейки
 Telegram: @xDream_Master
 Email: drea_m_aster@vk.com
 Версия: {VERSION}"""
-    
+
         messagebox.showinfo("Справка", help_text)
         logging.info("Открыта справка")
     
@@ -2440,6 +2864,7 @@ Email: drea_m_aster@vk.com
 ⚙️ УПРАВЛЕНИЕ СТОЛБЦАМИ:
 • Скрытие/отображение столбцов
 • Настройка видимости через диалог
+• Перетаскивание для изменения порядка
 • Сброс настроек к значениям по умолчанию
 
 🎨 НОВЫЙ КОНСТРУКТОР ШАБЛОНОВ:
@@ -2458,12 +2883,26 @@ Email: drea_m_aster@vk.com
 🔄 ОБНОВЛЕННЫЕ ПЕРЕМЕННЫЕ:
 • {CN} - Тип ЦН (ранее {{TL}})
 
+🚀 НОВЫЕ ФУНКЦИИ ОТЧЕТА В ВЕРСИИ {VERSION}:
+✓ Сохранение истории переименований в базе данных SQLite
+✓ Фильтрация отчетов по дате и маршруту
+✓ Просмотр отчетов за прошлые дни
+✓ Сохранение данных между запусками программы
+✓ Автоматическое обновление списка доступных дат
+✓ Очистка отчетов с подтверждением
+
+📊 БАЗА ДАННЫХ:
+• Все переименования сохраняются в локальной базе данных
+• Данные доступны после перезапуска программы
+• Возможность фильтрации по любым датам
+• Быстрый поиск и сортировка записей
+
 Техническая поддержка:
 - Telegram: @xDream_Master
 - Email: drea_m_aster@vk.com
 
 © 2024 Все права защищены."""
-    
+
         messagebox.showinfo("О программе", info_text)
         logging.info("Открыта информация о программе")
     

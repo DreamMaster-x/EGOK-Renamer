@@ -10,7 +10,7 @@ echo.
 echo Установка основных библиотек...
 pip install watchdog
 pip install pillow
-pip install tksheet
+pip install tksheet --upgrade
 
 if errorlevel 1 (
     echo Ошибка установки библиотек!
