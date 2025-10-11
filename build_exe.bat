@@ -44,9 +44,9 @@ if not exist "plugins\example_plugin.py" (
     type nul > plugins\example_plugin.py
 )
 
-if not exist "plugins\file_generator_plugin.py" (
-    echo Создаем плагин генератора файлов...
-    type nul > plugins\file_generator_plugin.py
+if not exist "plugins\report_plugin.py" (
+    echo Создаем плагин отчетов...
+    type nul > plugins\report_plugin.py
 )
 
 :: Проверяем наличие иконки
@@ -129,7 +129,7 @@ echo - icon.ico (рядом с EXE, если используется)
 echo - plugins/ (папка с плагинами)
 echo.
 echo НОВЫЕ ФУНКЦИИ:
-echo 1. ПЛАГИН ГЕНЕРАТОРА ФАЙЛОВ - создает тестовые файлы
-echo 2. Требует установленный Pillow (PIL) для генерации изображений
+echo 1. ПЛАГИН ОТЧЕТОВ - полнофункциональная система отчетов
+echo 2. ВСЕ ФУНКЦИИ ОТЧЕТОВ ПЕРЕНЕСЕНЫ В ОТДЕЛЬНЫЙ ПЛАГИН
 echo.
 pause

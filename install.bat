@@ -55,11 +55,11 @@ if not exist "plugins\example_plugin.py" (
     ) > plugins\example_plugin.py
 )
 
-:: Создаем плагин генератора файлов
-if not exist "plugins\file_generator_plugin.py" (
-    echo Создаем плагин генератора файлов...
-    type nul > plugins\file_generator_plugin.py
-    echo Файл плагина создан, заполните его кодом вручную
+:: Создаем плагин отчетов
+if not exist "plugins\report_plugin.py" (
+    echo Создаем плагин отчетов...
+    type nul > plugins\report_plugin.py
+    echo Файл плагина отчетов создан, заполните его кодом вручную
 )
 
 echo.
@@ -75,8 +75,9 @@ echo.
 echo Создана структура папок:
 echo - plugins/ ^(папка для плагинов^)
 echo - plugins/example_plugin.py ^(пример плагина^)
-echo - plugins/file_generator_plugin.py ^(плагин генератора^)
+echo - plugins/report_plugin.py ^(плагин отчетов^)
 echo.
-echo Для работы плагина генератора файлов необходим Pillow!
+echo ДОБАВЛЕН НОВЫЙ ПЛАГИН:
+echo - report_plugin.py ^(полнофункциональные отчеты^)
 echo.
 pause

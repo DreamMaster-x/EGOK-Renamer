@@ -22,13 +22,13 @@
     "{project}_{CN}_{date}_{counter}",
     "{route}_{date}_{counter}_{project}"
   ],
-  "enabled_plugins": ["example_plugin"],
+  "enabled_plugins": ["example_plugin", "report_plugin", "photo_merge_plugin", "file_generator_plugin", "comma_replacer_plugin"],
   "combobox_values": {
     "project": ["Проект1", "Проект2"],
     "cn_type": ["VK", "Другой"],
     "route": ["M2.1", "M2.2", "M2.3"],
     "number_format": ["1", "01", "001"],
-    "date_format": ["ДДММГГГГ", "ДДММГГ", "ГГГГММДД", "ДД.ММ.ГГГГ", "ДД.ММ.ГГ", "ГГГГ.ММ.ДД"],
+    "date_format": ["ГГГГММДД", "ДДММГГ", "ДДММГГГГ", "ДД.ММ.ГГГГ", "ДД.ММ.ГГ", "ГГГГ.ММ.ДД"],
     "var1": ["Значение1", "Значение2"],
     "var2": ["Значение1", "Значение2"],
     "var3": ["Значение1", "Значение2"]
