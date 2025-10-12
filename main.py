@@ -520,12 +520,11 @@ class Settings:
                 "var3": ["Значение1", "Значение2"]
             },
             "report_route_history": [],
-            "column_order": ["number", "create_time", "route", "original_name", "new_name"],
+            "column_order": ["number", "create_time", "route", "new_name"],
             "column_visibility": {
                 "number": True,
                 "create_time": True,
                 "route": True,
-                "original_name": True,
                 "new_name": True
             }
         }
@@ -799,9 +798,9 @@ class RenamerApp:
         self.report_data = []
         self.filtered_report_data = []
         
-        # Заголовки колонок
-        self.column_headers = ["№", "Время создания", "Маршрут", "Исходное имя файла", "Новое имя файла"]
-        self.column_ids = ["number", "create_time", "route", "original_name", "new_name"]
+        # Заголовки колонок (УДАЛЕНА КОЛОНКА "Исходное имя файла")
+        self.column_headers = ["№", "Время создания", "Маршрут", "Новое имя файла"]
+        self.column_ids = ["number", "create_time", "route", "new_name"]
         
         # Словарь для управления видимостью колонок
         self.column_visibility = self.settings.settings["column_visibility"]
@@ -1204,14 +1203,11 @@ class RenamerApp:
         report_controls_frame = ttk.Frame(report_frame)
         report_controls_frame.pack(fill=tk.X, pady=5)
         
-        # Кнопки управления отчетом
+        # Кнопки управления отчетом (УДАЛЕНА КНОПКА "Управление колонками")
         ttk.Button(report_controls_frame, text="Копировать выделенное", command=self.copy_selected_cells).pack(side=tk.LEFT, padx=2)
         ttk.Button(report_controls_frame, text="Копировать все", command=self.copy_all_files).pack(side=tk.LEFT, padx=2)
         ttk.Button(report_controls_frame, text="Очистить отчет", command=self.clear_report).pack(side=tk.LEFT, padx=2)
         ttk.Button(report_controls_frame, text="Экспорт в файл", command=self.export_report).pack(side=tk.LEFT, padx=2)
-        
-        # Кнопка управления колонками
-        ttk.Button(report_controls_frame, text="Управление колонками", command=self.show_column_management_dialog).pack(side=tk.LEFT, padx=2)
         
         # Фильтр по маршруту и дате
         filter_frame = ttk.Frame(report_controls_frame)
@@ -1340,12 +1336,11 @@ class RenamerApp:
             # Настраиваем таблицу для лучшего отображения
             self.report_sheet.set_sheet_data(self.report_data)
             
-            # Настраиваем ширину колонок
+            # Настраиваем ширину колонок (УДАЛЕНА КОЛОНКА "Исходное имя файла")
             self.report_sheet.column_width(column=0, width=50)   # №
             self.report_sheet.column_width(column=1, width=120)  # Время создания
             self.report_sheet.column_width(column=2, width=100)  # Маршрут
-            self.report_sheet.column_width(column=3, width=250)  # Исходное имя файла
-            self.report_sheet.column_width(column=4, width=250)  # Новое имя файла
+            self.report_sheet.column_width(column=3, width=500)  # Новое имя файла
             
             # Настраиваем выравнивание
             if self.report_data:
@@ -1399,8 +1394,6 @@ class RenamerApp:
         columns_menu = tk.Menu(self.enhanced_context_menu, tearoff=0)
         columns_menu.add_command(label="Скрыть столбец", command=self.hide_current_column)
         columns_menu.add_command(label="Показать все столбцы", command=self.show_all_columns)
-        columns_menu.add_separator()
-        columns_menu.add_command(label="Настроить столбцы...", command=self.show_column_management_dialog)
         self.enhanced_context_menu.add_cascade(label="Столбцы", menu=columns_menu)
         
         self.enhanced_context_menu.add_separator()
@@ -1413,23 +1406,21 @@ class RenamerApp:
     
     def create_fallback_table(self, parent):
         """Создание резервной таблицы с помощью Treeview (если tksheet не доступен)"""
-        # Создаем Treeview для отчета с новыми колонками
-        columns = ("number", "create_time", "route", "original_name", "new_name")
+        # Создаем Treeview для отчета с новыми колонками (УДАЛЕНА КОЛОНКА "original_name")
+        columns = ("number", "create_time", "route", "new_name")
         self.report_tree = ttk.Treeview(parent, columns=columns, show="headings", selectmode='extended')
         
-        # Настраиваем заголовки колонок
+        # Настраиваем заголовки колонок (УДАЛЕНА КОЛОНКА "Исходное имя")
         self.report_tree.heading("number", text="№")
         self.report_tree.heading("create_time", text="Время")
         self.report_tree.heading("route", text="Маршрут")
-        self.report_tree.heading("original_name", text="Исходное имя")
         self.report_tree.heading("new_name", text="Новое имя")
         
-        # Настраиваем колонки для максимального расширения
+        # Настраиваем колонки для максимального расширения (УДАЛЕНА КОЛОНКА "original_name")
         self.report_tree.column("number", width=40, minwidth=40, stretch=False)
         self.report_tree.column("create_time", width=120, minwidth=120, stretch=False)
         self.report_tree.column("route", width=80, minwidth=80, stretch=False)
-        self.report_tree.column("original_name", width=200, minwidth=150, stretch=True)
-        self.report_tree.column("new_name", width=200, minwidth=150, stretch=True)
+        self.report_tree.column("new_name", width=500, minwidth=300, stretch=True)
         
         # Scrollbar для Treeview
         report_scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.report_tree.yview)
@@ -1828,20 +1819,20 @@ class RenamerApp:
                     f.write(f"Фильтр по маршруту: {self.current_route_filter}\n")
                     f.write(f"Фильтр по дате: {self.current_date_filter or 'Все даты'}\n")
                     f.write("=" * 80 + "\n")
-                    f.write("№\tВремя\tМаршрут\tИсходное имя\tНовое имя\n")
+                    f.write("№\tВремя\tМаршрут\tНовое имя\n")  # УДАЛЕНА КОЛОНКА "Исходное имя"
                     f.write("-" * 80 + "\n")
                     
                     if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
                         # Экспорт данных из tksheet
                         for row in self.report_sheet.get_sheet_data():
                             if row and any(cell is not None for cell in row):
-                                f.write(f"{row[0] or ''}\t{row[1] or ''}\t{row[2] or ''}\t{row[3] or ''}\t{row[4] or ''}\n")
+                                f.write(f"{row[0] or ''}\t{row[1] or ''}\t{row[2] or ''}\t{row[3] or ''}\n")  # УДАЛЕНА КОЛОНКА
                     else:
                         # Экспорт данных из Treeview
                         for item in self.report_tree.get_children():
                             values = self.report_tree.item(item, "values")
-                            if values and len(values) > 4:
-                                f.write(f"{values[0]}\t{values[1]}\t{values[2]}\t{values[3]}\t{values[4]}\n")
+                            if values and len(values) > 3:  # Теперь 4 колонки вместо 5
+                                f.write(f"{values[0]}\t{values[1]}\t{values[2]}\t{values[3]}\n")  # УДАЛЕНА КОЛОНКА
                 
                 messagebox.showinfo("Успех", f"Отчет экспортирован в файл:\n{file_path}")
                 logging.info(f"Отчет экспортирован в файл: {file_path}")
@@ -1876,12 +1867,11 @@ class RenamerApp:
             "number": number,
             "create_time": create_time,
             "route": route,
-            "original_name": original_name,
             "new_name": new_name
         })
         
-        # Создаем строку данных
-        row_data = [number, create_time, route, original_name, new_name]
+        # Создаем строку данных (УДАЛЕНА КОЛОНКА "original_name")
+        row_data = [number, create_time, route, new_name]
         
         # Добавляем в данные отчета
         self.report_data.append(row_data)
@@ -1894,7 +1884,7 @@ class RenamerApp:
         if TKSHEET_AVAILABLE and hasattr(self, 'report_sheet'):
             self.report_sheet.set_sheet_data(self.report_data)
         elif hasattr(self, 'report_tree'):
-            values = (number, create_time, route, original_name, new_name)
+            values = (number, create_time, route, new_name)  # УДАЛЕНА КОЛОНКА "original_name"
             item_id = self.report_tree.insert("", tk.END, values=values)
             
             # Автоматически прокручиваем к последней записи
@@ -1917,15 +1907,14 @@ class RenamerApp:
         try:
             records = self.db_manager.get_records_by_date()
             
-            # Преобразуем записи в формат для отчета
+            # Преобразуем записи в формат для отчета (УДАЛЕНА КОЛОНКА "original_name")
             self.report_data = []
             for i, record in enumerate(records):
                 row_data = [
                     i + 1,
                     record['timestamp'].split(' ')[1] if ' ' in record['timestamp'] else record['timestamp'],
                     record['route'],
-                    record['original_name'],
-                    record['new_name']
+                    record['new_name']  # УДАЛЕНА КОЛОНКА "original_name"
                 ]
                 self.report_data.append(row_data)
             
@@ -1998,7 +1987,6 @@ class RenamerApp:
                 "number": "№",
                 "create_time": "Время",
                 "route": "Маршрут",
-                "original_name": "Исходное имя",
                 "new_name": "Новое имя"
             }
             
@@ -2097,169 +2085,6 @@ class RenamerApp:
         # Добавляем информацию о поддержке в нижний колонтитул
         support_label = ttk.Label(footer_frame, text=f"{self.developer_info} | Версия: {VERSION}", foreground="gray", font=('Arial', 8))
         support_label.pack(side=tk.RIGHT, padx=5)
-    
-    def show_column_management_dialog(self):
-        """Диалог управления колонками"""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Управление колонками отчета")
-        dialog.geometry("400x350")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        
-        main_frame = ttk.Frame(dialog, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        ttk.Label(main_frame, text="Управление колонками отчета:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 10))
-        
-        # Фрейм для списка колонок с возможностью перетаскивания
-        columns_frame = ttk.LabelFrame(main_frame, text="Видимые колонки (перетащите для изменения порядка)")
-        columns_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        # Создаем список колонок с чекбоксами
-        self.column_vars = {}
-        self.column_listbox = tk.Listbox(columns_frame, selectmode=tk.SINGLE)
-        scrollbar = ttk.Scrollbar(columns_frame, orient=tk.VERTICAL, command=self.column_listbox.yview)
-        self.column_listbox.configure(yscrollcommand=scrollbar.set)
-        
-        # Заполняем список колонок
-        column_names = {
-            "number": "№",
-            "create_time": "Время создания",
-            "route": "Маршрут",
-            "original_name": "Исходное имя файла",
-            "new_name": "Новое имя файла"
-        }
-        
-        for column_id in self.column_order:
-            if column_id in self.column_visibility:
-                display_name = column_names.get(column_id, column_id)
-                status = "✓" if self.column_visibility[column_id] else "✗"
-                self.column_listbox.insert(tk.END, f"{status} {display_name}")
-                self.column_vars[column_id] = self.column_visibility[column_id]
-        
-        # Привязываем обработчик двойного клика для переключения видимости
-        self.column_listbox.bind("<Double-Button-1>", self.toggle_column_visibility)
-        
-        # Привязываем обработчик перетаскивания для изменения порядка
-        self.column_listbox.bind('<ButtonPress-1>', self.on_drag_start)
-        self.column_listbox.bind('<B1-Motion>', self.on_drag_motion)
-        self.column_listbox.bind('<ButtonRelease-1>', self.on_drag_release)
-        
-        self.column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Кнопки управления
-        buttons_frame = ttk.Frame(main_frame)
-        buttons_frame.pack(fill=tk.X, pady=10)
-        
-        ttk.Button(buttons_frame, text="Сохранить", command=lambda: self.save_column_settings(dialog)).pack(side=tk.LEFT, padx=5)
-        ttk.Button(buttons_frame, text="Сбросить", command=self.reset_column_settings).pack(side=tk.LEFT, padx=5)
-        ttk.Button(buttons_frame, text="Отмена", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
-    
-    def toggle_column_visibility(self, event):
-        """Переключение видимости колонки при двойном клике"""
-        selection = self.column_listbox.curselection()
-        if selection:
-            index = selection[0]
-            column_id = self.column_order[index]
-            self.column_vars[column_id] = not self.column_vars[column_id]
-            
-            # Обновляем отображение в списке
-            column_names = {
-                "number": "№",
-                "create_time": "Время создания",
-                "route": "Маршрут",
-                "original_name": "Исходное имя файла",
-                "new_name": "Новое имя файла"
-            }
-            
-            display_name = column_names.get(column_id, column_id)
-            status = "✓" if self.column_vars[column_id] else "✗"
-            self.column_listbox.delete(index)
-            self.column_listbox.insert(index, f"{status} {display_name}")
-            self.column_listbox.selection_set(index)
-    
-    def on_drag_start(self, event):
-        """Начало перетаскивания элемента списка"""
-        self.drag_start_index = self.column_listbox.nearest(event.y)
-    
-    def on_drag_motion(self, event):
-        """Перетаскивание элемента списка"""
-        pass  # Визуальная обработка не требуется
-    
-    def on_drag_release(self, event):
-        """Завершение перетаскивания элемента списка"""
-        end_index = self.column_listbox.nearest(event.y)
-        if hasattr(self, 'drag_start_index') and self.drag_start_index != end_index:
-            # Перемещаем элемент в списке
-            items = list(self.column_vars.items())
-            item_to_move = items.pop(self.drag_start_index)
-            items.insert(end_index, item_to_move)
-            
-            # Обновляем порядок колонок
-            self.column_order = [item[0] for item in items]
-            self.column_vars = dict(items)
-            
-            # Обновляем отображение списка
-            self.column_listbox.delete(0, tk.END)
-            
-            column_names = {
-                "number": "№",
-                "create_time": "Время создания",
-                "route": "Маршрут",
-                "original_name": "Исходное имя файла",
-                "new_name": "Новое имя файла"
-            }
-            
-            for column_id, is_visible in items:
-                display_name = column_names.get(column_id, column_id)
-                status = "✓" if is_visible else "✗"
-                self.column_listbox.insert(tk.END, f"{status} {display_name}")
-            
-            # Выделяем перемещенный элемент
-            self.column_listbox.selection_set(end_index)
-    
-    def save_column_settings(self, dialog):
-        """Сохранение настроек колонок"""
-        # Сохраняем настройки видимости
-        self.column_visibility = self.column_vars.copy()
-        self.settings.update_setting("column_visibility", self.column_visibility)
-        self.settings.update_setting("column_order", self.column_order)
-        
-        # Применяем изменения
-        self.apply_column_visibility()
-        dialog.destroy()
-        logging.info("Настройки колонок сохранены")
-    
-    def reset_column_settings(self):
-        """Сброс настроек колонок к значениям по умолчанию"""
-        # Сбрасываем настройки к значениям по умолчанию
-        self.column_visibility = {
-            "number": True,
-            "create_time": True,
-            "route": True,
-            "original_name": True,
-            "new_name": True
-        }
-        self.column_order = ["number", "create_time", "route", "original_name", "new_name"]
-        
-        # Обновляем диалог
-        self.column_listbox.delete(0, tk.END)
-        
-        column_names = {
-            "number": "№",
-            "create_time": "Время создания",
-            "route": "Маршрут",
-            "original_name": "Исходное имя файла",
-            "new_name": "Новое имя файла"
-        }
-        
-        for column_id in self.column_order:
-            display_name = column_names.get(column_id, column_id)
-            status = "✓" if self.column_visibility[column_id] else "✗"
-            self.column_listbox.insert(tk.END, f"{status} {display_name}")
-        
-        logging.info("Настройки колонок сброшены к значениям по умолчанию")
     
     def install_plugin_dialog(self):
         """Диалог установки нового плагина"""
@@ -2619,8 +2444,8 @@ class RenamerApp:
         )
         
         for record in self.report_data:
-            if len(record) > 4:  # Проверяем, что есть новое имя файла
-                new_name = record[4]
+            if len(record) > 3:  # Теперь 4 колонки вместо 5
+                new_name = record[3]  # Индекс изменился
                 match = pattern.match(new_name)
                 if match:
                     counter = int(match.group(1))
@@ -2688,146 +2513,152 @@ class RenamerApp:
                             os.path.basename(filepath), new_name, new_path, create_time
                         ))
                         
-                        logging.info(f"Успешно переименован: {os.path.basename(filepath)} -> {new_name}")
+                        logging.info(f"Файл переименован: {os.path.basename(filepath)} -> {new_name}")
                         
                     except Exception as e:
                         logging.error(f"Ошибка переименования файла {filepath}: {e}")
+                        continue
         except Exception as e:
-            logging.error(f"Общая ошибка в rename_files: {e}")
-    
+            logging.error(f"Критическая ошибка в процессе переименования: {e}")
+
     def process_log_queue(self):
-        """Обработка очереди логов"""
+        """Обработка сообщений из очереди логов"""
         try:
             while True:
                 message = self.log_queue.get_nowait()
-                
-                # Ограничиваем количество строк в логах
-                self.log_line_counter += 1
-                if self.log_line_counter > 1000:
-                    self.log_text.delete("1.0", "100.0")
-                    self.log_line_counter = 900
-                
-                # Добавляем сообщение с цветом в зависимости от уровня
-                self.log_text.config(state=tk.NORMAL)
-                
-                if "ОШИБКА" in message or "ERROR" in message:
-                    self.log_text.insert(tk.END, f"{message}\n", "error")
-                elif "ПРЕДУПРЕЖДЕНИЕ" in message or "WARNING" in message:
-                    self.log_text.insert(tk.END, f"{message}\n", "warning")
-                elif "ИНФОРМАЦИЯ" in message or "INFO" in message:
-                    self.log_text.insert(tk.END, f"{message}\n", "info")
-                else:
-                    self.log_text.insert(tk.END, f"{message}\n", "black")
-                
-                self.log_text.config(state=tk.DISABLED)
-                self.log_text.see(tk.END)
-                
+                self.append_log(message)
         except queue.Empty:
             pass
-        
-        # Повторяем каждые 100 мс
-        self.root.after(100, self.process_log_queue)
-    
+        finally:
+            self.root.after(100, self.process_log_queue)
+
+    def append_log(self, message):
+        """Добавление сообщения в лог"""
+        try:
+            self.log_text.config(state=tk.NORMAL)
+            
+            # Определяем цвет в зависимости от уровня логирования
+            if "ERROR" in message:
+                tag = "error"
+            elif "WARNING" in message:
+                tag = "warning"
+            elif "INFO" in message:
+                tag = "info"
+            else:
+                tag = "black"
+            
+            # Добавляем сообщение в лог
+            self.log_text.insert(tk.END, message + "\n", tag)
+            
+            # Ограничиваем количество строк в логе
+            self.log_line_counter += 1
+            if self.log_line_counter > 1000:  # Ограничение на 1000 строк
+                self.log_text.delete("1.0", "100.0")
+                self.log_line_counter = 900
+            
+            # Автоматическая прокрутка к концу
+            self.log_text.see(tk.END)
+            self.log_text.config(state=tk.DISABLED)
+        except Exception as e:
+            # Если произошла ошибка, пробуем восстановить лог
+            try:
+                self.log_text.config(state=tk.DISABLED)
+            except:
+                pass
+
     def show_help(self):
         """Показать справку"""
-        help_text = """
-СПРАВКА ПО ПРОГРАММЕ EGOK RENAMER
+        help_text = f"""
+EGOK Renamer v{VERSION} - Справка
 
 ОСНОВНЫЕ ФУНКЦИИ:
-• Автоматическое переименование файлов в указанной папке
+• Автоматическое переименование файлов по шаблону
 • Мониторинг папки в реальном времени
-• Гибкая настройка шаблонов имен
-• Поддержка переменных в шаблонах
 • Отчет о переименованных файлах
+• Гибкая настройка шаблонов имен
 
 ПЕРЕМЕННЫЕ В ШАБЛОНАХ:
-• {project} - название проекта
-• {CN} - тип ЦН
-• {route} - маршрут
-• {date} - дата в выбранном формате
-• {counter} - порядковый номер
-• {extension} - расширение файла
-• {1}, {2}, {3} - пользовательские переменные
+{{project}} - Название проекта
+{{CN}} - Тип ЦН (центра нарушения)
+{{route}} - Маршрут
+{{date}} - Дата в выбранном формате
+{{counter}} - Счетчик файлов
+{{extension}} - Расширение файла
+{{1}}, {{2}}, {{3}} - Пользовательские переменные
 
 ФОРМАТЫ ДАТЫ:
-• ДДММГГГГ - 31122023
-• ДДММГГ - 311223
-• ГГГГММДД - 20231231
-• ДД.ММ.ГГГГ - 31.12.2023
-• ДД.ММ.ГГ - 31.12.23
-• ГГГГ.ММ.ДД - 2023.12.31
+ДДММГГГГ - 31122023
+ДДММГГ - 311223  
+ГГГГММДД - 20231231
+ДД.ММ.ГГГГ - 31.12.2023
+ДД.ММ.ГГ - 31.12.23
+ГГГГ.ММ.ДД - 2023.12.31
 
-УПРАВЛЕНИЕ ОТЧЕТОМ:
-• Копирование выделенных ячеек
-• Экспорт в файл
-• Фильтрация по маршруту и дате
-• Настройка видимости колонок
+РАСШИРЕНИЯ ФАЙЛОВ:
+Указываются через запятую: png,jpg,jpeg
 
-РАСШИРЕНИЯ:
-• Поддержка плагинов для добавления функций
-• Установка новых плагинов через диалог
+ПЛАГИНЫ:
+• Дополнительные вкладки с расширенным функционалом
+• Установка через меню "Установить плагин"
+• Управление через "Управление плагинами"
 
-ДОПОЛНИТЕЛЬНЫЕ ФУНКЦИИ:
-• Конструктор шаблонов для визуального создания
-• История шаблонов и папок
-• Настройка формата нумерации
-        """
-        
-        help_window = tk.Toplevel(self.root)
-        help_window.title("Справка")
-        help_window.geometry("600x500")
-        
-        text_widget = tk.Text(help_window, wrap=tk.WORD, padx=10, pady=10)
-        text_widget.insert("1.0", help_text)
-        text_widget.config(state=tk.DISABLED)
-        
-        scrollbar = ttk.Scrollbar(help_window, orient=tk.VERTICAL, command=text_widget.yview)
-        text_widget.configure(yscrollcommand=scrollbar.set)
-        
-        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    
+{self.developer_info}
+"""
+        messagebox.showinfo("Справка", help_text)
+
     def show_info(self):
         """Показать информацию о программе"""
         info_text = f"""
-EGOK RENAMER v{VERSION}
+EGOK Renamer v{VERSION}
 
-Программа для автоматического переименования файлов
-по заданному шаблону с поддержкой мониторинга папки.
+Программа для автоматического переименования 
+файлов по заданному шаблону.
 
-ФУНКЦИОНАЛ:
-• Автоматическое переименование файлов
-• Мониторинг папки в реальном времени
-• Гибкие шаблоны имен с переменными
-• Подробный отчет о действиях
-• Поддержка плагинов
-• Экспорт данных
+ВОЗМОЖНОСТИ:
+✓ Автоматическое переименование файлов
+✓ Мониторинг папки в реальном времени  
+✓ Гибкая настройка шаблонов имен
+✓ Поддержка плагинов
+✓ Подробный отчет о переименованных файлах
+✓ Фильтрация отчета по маршруту и дате
 
-РАЗРАБОТЧИК: {self.developer_info}
-
-ИСПОЛЬЗУЕМЫЕ БИБЛИОТЕКИ:
-• tkinter - графический интерфейс
-• watchdog - мониторинг файловой системы
-• tksheet - расширенная таблица (если доступна)
-• PIL - работа с изображениями
-
-СТАТУС МОНИТОРИНГА: {"ВКЛЮЧЕН" if (self.monitor and self.monitor.is_monitoring) else "ВЫКЛЮЧЕН"}
-
-КОЛИЧЕСТВО ПЛАГИНОВ: {len(self.plugin_manager.plugins)}
-
-ЗАПИСЕЙ В ОТЧЕТЕ: {len(self.report_data)}
-        """
-        
+{self.developer_info}
+"""
         messagebox.showinfo("О программе", info_text)
+
+    def on_closing(self):
+        """Обработка закрытия приложения"""
+        try:
+            # Останавливаем мониторинг
+            if self.monitor:
+                self.stop_monitoring()
+            
+            # Сохраняем настройки
+            self.save_settings()
+            
+            logging.info("=" * 50)
+            logging.info("ПРОГРАММА ЗАВЕРШЕНА")
+            logging.info("=" * 50)
+            
+            self.root.destroy()
+        except Exception as e:
+            logging.error(f"Ошибка при завершении программы: {e}")
+            self.root.destroy()
 
 def main():
     """Главная функция"""
     try:
+        # Создаем главное окно
         root = tk.Tk()
         app = RenamerApp(root)
+        
+        # Обработка закрытия окна
+        root.protocol("WM_DELETE_WINDOW", app.on_closing)
+        
+        # Запускаем главный цикл
         root.mainloop()
     except Exception as e:
-        logging.critical(f"Критическая ошибка: {e}")
+        logging.error(f"Критическая ошибка: {e}")
         messagebox.showerror("Ошибка", f"Критическая ошибка при запуске: {e}")
 
 if __name__ == "__main__":
