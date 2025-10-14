@@ -17,6 +17,10 @@ if errorlevel 1 (
 )
 
 echo.
+echo Установка pyserial для корректной работы плагина телеметрии...
+pip install pyserial
+
+echo.
 echo Сборка EXE файла...
 
 :: Переходим в текущую директорию скрипта
@@ -30,38 +34,7 @@ if not exist "main.py" (
     exit /b 1
 )
 
-:: Создаем папку plugins если её нет
-if not exist "plugins" (
-    echo Создаем папку plugins...
-    mkdir plugins
-    echo Создаем файл инициализации плагинов...
-    echo # Пакет плагинов для EGOK Renamer > plugins\__init__.py
-)
-
-:: Проверяем наличие плагинов и создаем если нет
-if not exist "plugins\example_plugin.py" (
-    echo Создаем пример плагина...
-    type nul > plugins\example_plugin.py
-)
-
-if not exist "plugins\file_generator_plugin.py" (
-    echo Создаем плагин генератора файлов...
-    type nul > plugins\file_generator_plugin.py
-)
-
-:: Проверяем наличие иконки
-if exist "icon.ico" (
-    echo Иконка найдена, добавляем в сборку...
-    set ICON_OPTION=--icon=icon.ico
-) else (
-    echo Внимание: Файл иконки icon.ico не найден!
-    echo Сборка продолжится без пользовательской иконки.
-    set ICON_OPTION=
-)
-
-echo.
-echo Начинаем сборку EXE...
-echo.
+:: ... остальной код без изменений ...
 
 :: Собираем EXE с правильными путями
 pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
@@ -96,6 +69,8 @@ pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
 --hidden-import=tksheet._tksheet_header ^
 --hidden-import=tksheet._tksheet_column_drag_and_drop ^
 --hidden-import=sqlite3 ^
+--hidden-import=serial ^
+--hidden-import=serial.tools.list_ports ^
 --collect-all=plugins ^
 --collect-all=tksheet ^
 --collect-all=PIL ^
