@@ -22,7 +22,7 @@
     "{project}_{CN}_{date}_{counter}",
     "{route}_{date}_{counter}_{project}"
   ],
-  "enabled_plugins": ["example_plugin"],
+  "enabled_plugins": ["example_plugin", "telemetry_plugin"],
   "combobox_values": {
     "project": ["Проект1", "Проект2"],
     "cn_type": ["VK", "Другой"],

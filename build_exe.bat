@@ -21,6 +21,11 @@ echo Установка pyserial для корректной работы пла
 pip install pyserial
 
 echo.
+echo Установка библиотек для плагина PDF->KML...
+pip install PyPDF2
+pip install simplekml
+
+echo.
 echo Сборка EXE файла...
 
 :: Переходим в текущую директорию скрипта
@@ -34,7 +39,14 @@ if not exist "main.py" (
     exit /b 1
 )
 
-:: ... остальной код без изменений ...
+:: Проверяем наличие иконки
+set ICON_OPTION=
+if exist "icon.ico" (
+    set ICON_OPTION=--icon=icon.ico
+    echo Используется иконка: icon.ico
+) else (
+    echo Иконка не найдена, используется стандартная
+)
 
 :: Собираем EXE с правильными путями
 pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
@@ -57,7 +69,6 @@ pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
 --hidden-import=inspect ^
 --hidden-import=importlib.util ^
 --hidden-import=importlib.machinery ^
---hidden-import=requests ^
 --hidden-import=json ^
 --hidden-import=tksheet ^
 --hidden-import=tksheet._tksheet ^
@@ -71,9 +82,15 @@ pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
 --hidden-import=sqlite3 ^
 --hidden-import=serial ^
 --hidden-import=serial.tools.list_ports ^
+--hidden-import=PyPDF2 ^
+--hidden-import=PyPDF2._utils ^
+--hidden-import=PyPDF2.generic ^
+--hidden-import=simplekml ^
 --collect-all=plugins ^
 --collect-all=tksheet ^
 --collect-all=PIL ^
+--collect-all=PyPDF2 ^
+--collect-all=simplekml ^
 main.py
 
 if errorlevel 1 (
@@ -104,7 +121,7 @@ echo - icon.ico (рядом с EXE, если используется)
 echo - plugins/ (папка с плагинами)
 echo.
 echo НОВЫЕ ФУНКЦИИ:
-echo 1. ПЛАГИН ГЕНЕРАТОРА ФАЙЛОВ - создает тестовые файлы
-echo 2. Требует установленный Pillow (PIL) для генерации изображений
+echo 1. ПЛАГИН PDF->KML - конвертация представлений в KML
+echo 2. Требует установленные PyPDF2 и simplekml
 echo.
 pause
