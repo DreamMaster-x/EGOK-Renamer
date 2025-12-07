@@ -7,121 +7,90 @@ echo    Сборка EGOK_Renamer в EXE
 echo ========================================
 echo.
 
-echo Проверка установки PyInstaller...
-pip install pyinstaller
-
-if errorlevel 1 (
-    echo Ошибка установки PyInstaller!
-    pause
-    exit /b 1
+echo Шаг 1: Проверка основных файлов...
+if not exist "EGOK_Renamer.py" (
+    echo ОШИБКА: Файл EGOK_Renamer.py не найден!
+    goto error
 )
 
-echo.
-echo Установка pyserial для корректной работы плагина телеметрии...
-pip install pyserial
+echo Шаг 2: Создание структуры папок...
+if not exist "plugins" mkdir plugins
+if not exist "plugins\__init__.py" echo # Пакет плагинов > plugins\__init__.py
 
-echo.
-echo Установка библиотек для плагина PDF->KML...
-pip install PyPDF2
-pip install simplekml
+echo Шаг 3: Установка библиотек...
+pip install watchdog pillow tksheet pyserial PyPDF2 simplekml --quiet
 
-echo.
-echo Сборка EXE файла...
+echo Шаг 4: Сборка EXE...
+echo Пожалуйста, подождите...
 
-:: Переходим в текущую директорию скрипта
-cd /d "%~dp0"
-
-:: Проверяем существование main.py
-if not exist "main.py" (
-    echo Ошибка: Файл main.py не найден!
-    echo Убедитесь, что bat-файл находится в одной папке с main.py
-    pause
-    exit /b 1
-)
-
-:: Проверяем наличие иконки
-set ICON_OPTION=
-if exist "icon.ico" (
-    set ICON_OPTION=--icon=icon.ico
-    echo Используется иконка: icon.ico
-) else (
-    echo Иконка не найдена, используется стандартная
-)
-
-:: Собираем EXE с правильными путями
-pyinstaller --onefile --windowed --name "EGOK_Renamer" %ICON_OPTION% ^
+pyinstaller --noconfirm --onefile --windowed ^
+--name "EGOK_Renamer" ^
+--icon=icon.ico ^
 --add-data "background.png;." ^
 --add-data "settings.json;." ^
 --add-data "icon.ico;." ^
---add-data "plugins\*;plugins" ^
+--add-data "plugins;plugins" ^
 --hidden-import=watchdog.observers ^
 --hidden-import=watchdog.events ^
 --hidden-import=PIL ^
 --hidden-import=PIL._tkinter_finder ^
 --hidden-import=PIL.Image ^
---hidden-import=PIL.ImageDraw ^
---hidden-import=PIL.ImageFont ^
 --hidden-import=threading ^
 --hidden-import=queue ^
 --hidden-import=pathlib ^
 --hidden-import=re ^
 --hidden-import=importlib ^
 --hidden-import=inspect ^
---hidden-import=importlib.util ^
---hidden-import=importlib.machinery ^
 --hidden-import=json ^
 --hidden-import=tksheet ^
---hidden-import=tksheet._tksheet ^
---hidden-import=tksheet._tksheet_formatters ^
---hidden-import=tksheet._tksheet_other ^
---hidden-import=tksheet._tksheet_main_table ^
---hidden-import=tksheet._tksheet_top_left_rectangle ^
---hidden-import=tksheet._tksheet_row_index ^
---hidden-import=tksheet._tksheet_header ^
---hidden-import=tksheet._tksheet_column_drag_and_drop ^
 --hidden-import=sqlite3 ^
 --hidden-import=serial ^
 --hidden-import=serial.tools.list_ports ^
+--hidden-import=serial.serialutil ^
+--hidden-import=serial.win32 ^
 --hidden-import=PyPDF2 ^
---hidden-import=PyPDF2._utils ^
---hidden-import=PyPDF2.generic ^
 --hidden-import=simplekml ^
---collect-all=plugins ^
---collect-all=tksheet ^
---collect-all=PIL ^
---collect-all=PyPDF2 ^
---collect-all=simplekml ^
-main.py
+--hidden-import=binascii ^
+--hidden-import=math ^
+EGOK_Renamer.py
 
-if errorlevel 1 (
+if %errorlevel% neq 0 (
     echo.
-    echo Ошибка сборки EXЕ!
-    echo.
-    echo Возможные решения:
-    echo 1. Убедитесь что файл main.py существует
-    echo 2. Проверьте установку Python и библиотек
-    echo 3. Запустите install.bat перед сборкой
-    echo 4. Убедитесь, что в пути к проекту нет русских букв или специальных символов
-    pause
-    exit /b 1
+    echo ОШИБКА при сборке!
+    goto error
 )
 
 echo.
 echo ========================================
-echo    Сборка завершена успешно!
+echo    СБОРКА УСПЕШНО ЗАВЕРШЕНА!
 echo ========================================
 echo.
-echo EXE файл: dist\EGOK_Renamer.exe
+echo Создан файл: dist\EGOK_Renamer.exe
 echo.
-echo Для запуска программы скопируйте из папки dist:
-echo - EGOK_Renamer.exe
-echo - background.png (рядом с EXE)
-echo - settings.json (рядом с EXE)
-echo - icon.ico (рядом с EXE, если используется)
-echo - plugins/ (папка с плагинами)
+echo Для запуска программы:
+echo 1. Откройте папку 'dist'
+echo 2. Запустите 'EGOK_Renamer.exe'
 echo.
-echo НОВЫЕ ФУНКЦИИ:
-echo 1. ПЛАГИН PDF->KML - конвертация представлений в KML
-echo 2. Требует установленные PyPDF2 и simplekml
+echo Нажмите любую клавишу для выхода...
+pause >nul
+exit /b 0
+
+:error
 echo.
-pause
+echo ========================================
+echo    ОШИБКА СБОРКИ
+echo ========================================
+echo.
+echo Возможные причины:
+echo 1. Python не установлен
+echo 2. Нет прав для записи
+echo 3. Повреждены файлы проекта
+echo.
+echo Решения:
+echo 1. Установите Python 3.8+
+echo 2. Запустите от имени администратора
+echo 3. Проверьте файлы в папке
+echo.
+echo Нажмите любую клавишу для выхода...
+pause >nul
+exit /b 1

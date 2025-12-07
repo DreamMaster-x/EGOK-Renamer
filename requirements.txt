@@ -1,2 +1,6 @@
-watchdog>=2.1.0
-Pillow>=9.0.0
+watchdog
+pillow
+tksheet
+pyserial
+PyPDF2
+simplekml

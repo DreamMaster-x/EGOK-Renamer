@@ -77,7 +77,12 @@ if not exist "plugins\file_generator_plugin.py" (
 :: Создаем плагин телеметрии
 if not exist "plugins\telemetry_plugin.py" (
     echo Создаем плагин обработки телеметрии...
-    type nul > plugins\telemetry_plugin.py
+    echo Импортируем существующий файл...
+    copy "telemetry_plugin.py" "plugins\telemetry_plugin.py" >nul 2>&1
+    if errorlevel 1 (
+        echo Файл telemetry_plugin.py не найден, создаем пустой...
+        type nul > plugins\telemetry_plugin.py
+    )
     echo Файл плагина телеметрии создан
 )
 
@@ -87,6 +92,32 @@ if not exist "plugins\pdf_kml_plugin.py" (
     type nul > plugins\pdf_kml_plugin.py
     echo Файл плагина PDF->KML создан
 )
+
+echo.
+echo Обновление настроек для включения плагинов...
+python -c "
+import json
+import os
+try:
+    if os.path.exists('settings.json'):
+        with open('settings.json', 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+        
+        enabled_plugins = settings.get('enabled_plugins', [])
+        if 'telemetry_plugin' not in enabled_plugins:
+            enabled_plugins.append('telemetry_plugin')
+            settings['enabled_plugins'] = enabled_plugins
+            
+            with open('settings.json', 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+            print('Настройки обновлены: telemetry_plugin добавлен в enabled_plugins')
+        else:
+            print('telemetry_plugin уже в enabled_plugins')
+    else:
+        print('Файл settings.json не найден, будут использованы настройки по умолчанию')
+except Exception as e:
+    print(f'Ошибка обновления настроек: {e}')
+"
 
 echo.
 echo ========================================
@@ -107,6 +138,8 @@ echo - plugins/example_plugin.py ^(пример плагина^)
 echo - plugins/file_generator_plugin.py ^(плагин генератора^)
 echo - plugins/telemetry_plugin.py ^(плагин телеметрии^)
 echo - plugins/pdf_kml_plugin.py ^(плагин PDF->KML^)
+echo.
+echo Плагин telemetry_plugin добавлен в настройки!
 echo.
 echo Для работы плагина PDF->KML необходимы PyPDF2 и simplekml!
 echo.
